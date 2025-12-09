@@ -1,0 +1,14 @@
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+bin/
+dist/
+preempt
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.env
+.env.local
