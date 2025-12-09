@@ -43,7 +43,7 @@ Preempt is a Go application that:
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.19+
 - SQLite3
 
 ## Installation
@@ -192,7 +192,7 @@ Returns the current weather forecast data from the Open-Meteo API.
 ## How It Works
 
 ### 1. Data Collection
-The application periodically fetches data from the Open-Meteo API for Tokyo (latitude: 35.6895, longitude: 139.6917) and stores:
+The application periodically fetches data from the Open-Meteo API for San Francisco and stores:
 - Temperature (2m height)
 - Relative humidity
 - Precipitation
@@ -257,23 +257,14 @@ CREATE TABLE alarm_suggestions (
 
 ## Configuration
 
-Currently, the application is configured for Tokyo, Japan. To monitor a different location, modify the coordinates in `cmd/server/main.go`:
+Currently, the application is configured for San Francisco. To monitor a different location, modify the coordinates in `cmd/server/main.go`:
 
 ```go
-forecast, err := client.GetForecast(35.6895, 139.6917) // latitude, longitude
+forecast, err := client.GetForecast(37.7749, -122.4194) // latitude, longitude
 ```
 
 ## Future Enhancements
 
-- [ ] Time-series analysis with ARIMA models
 - [ ] Machine learning for improved anomaly detection
-- [ ] Multi-location support
-- [ ] Alert notifications (email, Slack, etc.)
-- [ ] Web dashboard for visualization
-- [ ] Configuration file support
-- [ ] Predictive alerting based on forecasts
-- [ ] Custom thresholds per location
-
-## License
-
-MIT
+- [ ] Multi-location support (utilize kafka to scale)
+- [ ] Frontend for visualization

@@ -21,7 +21,7 @@ func main() {
 	// Initialize API client
 	client := api.NewOpenMeteoClient()
 
-	// San Francisco coordinates: 37.7749° N, 122.4194° W
+	// San Francisco coordinates: 37.7749° N, -122.4194° W
 	latitude := 37.7749
 	longitude := -122.4194
 
