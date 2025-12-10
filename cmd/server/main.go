@@ -12,7 +12,8 @@ import (
 func main() {
 
 	// Initialize database
-	db, err := database.NewDB("metrics.db")
+	//Update with your own credentials
+	db, err := database.NewDB("user:password@tcp(localhost:3306)/preempt?parseTime=true")
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}

@@ -8,7 +8,7 @@ Preempt is a Go application that:
 1. **Fetches real-time weather data** from the Open-Meteo API (currently hardcoded to SF, will allow for any location later)
 2. **Stores metrics** in a MySQL database
 3. **Detects anomalies** using statistical methods (Z-score based) - will probably change to ML model
-4. **Suggests alarms** based on anomalies and paterns detected to prevent future issues
+4. **Suggests alarms** based on anomalies and patterns detected to prevent future issues
 
 ## Features
 
