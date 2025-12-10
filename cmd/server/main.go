@@ -10,14 +10,14 @@ import (
 )
 
 func main() {
-	/*
-		// Initialize database
-		db, err := database.NewDB("metrics.db")
-		if err != nil {
-			log.Fatalf("Failed to initialize database: %v", err)
-		}
-		defer db.Close()
-	*/
+
+	// Initialize database
+	db, err := database.NewDB("metrics.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
 	// Initialize API client
 	client := api.NewOpenMeteoClient()
 
@@ -35,7 +35,7 @@ func main() {
 	// Print temperature metrics
 	fmt.Println("\n=== Temperature Data for San Francisco ===")
 	fmt.Printf("Hourly Temperature: %.1f°F\n", forecast.Hourly.Temperature2m)
-	fmt.Printf("Hourly dew point: %.1f°F\n", forecast.Hourly.DewPoint2m)
+	//fmt.Printf("Hourly dew point: %.1f°F\n", forecast.Hourly.DewPoint2m)
 
 	/*
 		// Initialize anomaly detector

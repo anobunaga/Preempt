@@ -5,18 +5,18 @@ Proactive alarm creation via anomaly detection from real-time metrics
 ## Overview
 
 Preempt is a Go application that:
-1. **Fetches real-time weather data** from the Open-Meteo API
-2. **Stores metrics** in a SQLite database
-3. **Detects anomalies** using statistical methods (Z-score based)
-4. **Suggests alarms** based on patterns to prevent future issues
+1. **Fetches real-time weather data** from the Open-Meteo API (currently hardcoded to SF, will allow for any location later)
+2. **Stores metrics** in a MySQL database
+3. **Detects anomalies** using statistical methods (Z-score based) - will probably change to ML model
+4. **Suggests alarms** based on anomalies and paterns detected to prevent future issues
 
 ## Features
 
-- **Real-time Data Collection**: Automatically fetches weather forecast data every 15 minutes
-- **Anomaly Detection**: Identifies unusual metric values using Z-score analysis
+- **Real-time Data Collection**: Automatically fetches weather forecast data every 15 minutes (can change frequency)
+- **Anomaly Detection**: Identifies unusual metric values using Z-score analysis (will change algorithm)
 - **Alarm Suggestions**: Proposes preventive alarm thresholds based on detected patterns
 - **REST API**: Full-featured HTTP API for querying data and anomalies
-- **SQLite Database**: Persistent storage of metrics, anomalies, and alarm suggestions
+- **MySQL Database**: Persistent storage of metrics, anomalies, and alarm suggestions
 
 ## Project Structure
 
@@ -29,7 +29,7 @@ Preempt is a Go application that:
 │   ├── api/
 │   │   └── client.go         # Open-Meteo API client
 │   ├── database/
-│   │   └── db.go             # SQLite database layer
+│   │   └── db.go             # MySQL database layer
 │   ├── detector/
 │   │   ├── detector.go       # Anomaly detection algorithm
 │   │   └── suggester.go      # Alarm suggestion engine
@@ -44,14 +44,11 @@ Preempt is a Go application that:
 ## Requirements
 
 - Go 1.19+
-- SQLite3
+- MySQL v1.6.0
 
 ## Installation
 
-1. Clone the repository:
-```bash
-cd /Users/adamnobunaga/projects/Preempt
-```
+1. Clone the repository
 
 2. Install dependencies:
 ```bash
@@ -265,6 +262,7 @@ forecast, err := client.GetForecast(37.7749, -122.4194) // latitude, longitude
 
 ## Future Enhancements
 
-- [ ] Machine learning for improved anomaly detection
-- [ ] Multi-location support (utilize kafka to scale)
-- [ ] Frontend for visualization
+- Machine learning for improved anomaly detection
+- Multi-location support
+- Add support for other API metrics (will need kafka to scale)
+- Frontend for visualization

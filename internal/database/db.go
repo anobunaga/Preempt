@@ -6,7 +6,7 @@ import (
 	"preempt/internal/models"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // DB represents the database connection
@@ -15,8 +15,10 @@ type DB struct {
 }
 
 // NewDB creates a new database connection and initializes the schema
-func NewDB(dbPath string) (*DB, error) {
-	conn, err := sql.Open("sqlite3", dbPath)
+// dsn format: "username:password@tcp(host:port)/dbname?parseTime=true"
+// example: "user:pass@tcp(localhost:3306)/preempt?parseTime=true"
+func NewDB(dsn string) (*DB, error) {
+	conn, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -25,6 +27,11 @@ func NewDB(dbPath string) (*DB, error) {
 	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
+
+	// Configure connection pool
+	conn.SetMaxOpenConns(25)
+	conn.SetMaxIdleConns(5)
+	conn.SetConnMaxLifetime(5 * time.Minute)
 
 	db := &DB{conn: conn}
 
@@ -38,42 +45,47 @@ func NewDB(dbPath string) (*DB, error) {
 
 // initSchema creates the necessary tables
 func (db *DB) initSchema() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS metrics (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp DATETIME NOT NULL,
-		metric_type TEXT NOT NULL,
-		value REAL NOT NULL
-	);
+	// MySQL doesn't support multiple statements in one Exec, so we need to split them
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS metrics (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			timestamp DATETIME(6) NOT NULL,
+			metric_type VARCHAR(100) NOT NULL,
+			value DOUBLE NOT NULL,
+			INDEX idx_metrics_timestamp (timestamp),
+			INDEX idx_metrics_type (metric_type)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
-	CREATE TABLE IF NOT EXISTS anomalies (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp DATETIME NOT NULL,
-		metric_type TEXT NOT NULL,
-		value REAL NOT NULL,
-		z_score REAL NOT NULL,
-		severity TEXT NOT NULL
-	);
+		`CREATE TABLE IF NOT EXISTS anomalies (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			timestamp DATETIME(6) NOT NULL,
+			metric_type VARCHAR(100) NOT NULL,
+			value DOUBLE NOT NULL,
+			z_score DOUBLE NOT NULL,
+			severity VARCHAR(50) NOT NULL,
+			INDEX idx_anomalies_timestamp (timestamp),
+			INDEX idx_anomalies_type (metric_type)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
-	CREATE TABLE IF NOT EXISTS alarm_suggestions (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		metric_type TEXT NOT NULL,
-		threshold REAL NOT NULL,
-		operator TEXT NOT NULL,
-		suggested_at DATETIME NOT NULL,
-		confidence REAL NOT NULL,
-		description TEXT NOT NULL,
-		anomaly_count INTEGER NOT NULL
-	);
+		`CREATE TABLE IF NOT EXISTS alarm_suggestions (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			metric_type VARCHAR(100) NOT NULL,
+			threshold DOUBLE NOT NULL,
+			operator VARCHAR(10) NOT NULL,
+			suggested_at DATETIME(6) NOT NULL,
+			confidence DOUBLE NOT NULL,
+			description TEXT NOT NULL,
+			anomaly_count INT NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+	}
 
-	CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics(timestamp);
-	CREATE INDEX IF NOT EXISTS idx_metrics_type ON metrics(metric_type);
-	CREATE INDEX IF NOT EXISTS idx_anomalies_timestamp ON anomalies(timestamp);
-	CREATE INDEX IF NOT EXISTS idx_anomalies_type ON anomalies(metric_type);
-	`
+	for _, stmt := range statements {
+		if _, err := db.conn.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute schema statement: %w", err)
+		}
+	}
 
-	_, err := db.conn.Exec(schema)
-	return err
+	return nil
 }
 
 // StoreMetrics stores all current metrics from the forecast
@@ -194,7 +206,7 @@ func (db *DB) GetMetricStats(metricType string, since time.Time) (mean, stdDev f
 	SELECT 
 		COUNT(*) as count,
 		AVG(value) as mean,
-		SQRT(AVG(value * value) - AVG(value) * AVG(value)) as stddev
+		STDDEV_POP(value) as stddev
 	FROM metrics 
 	WHERE metric_type = ? AND timestamp >= ?
 	`
