@@ -12,8 +12,7 @@ import (
 func main() {
 
 	// Initialize database
-	//Update with your own credentials
-	db, err := database.NewDB("user:password@tcp(localhost:3306)/preempt?parseTime=true")
+	db, err := database.NewDB("myapp:mypassword123@tcp(localhost:3306)/preempt?parseTime=true")
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -22,7 +21,7 @@ func main() {
 	// Initialize API client
 	client := api.NewOpenMeteoClient()
 
-	// San Francisco coordinates: 37.7749° N, -122.4194° W
+	// San Francisco coordinates: 37.7749° N, -122.4194° W - change this later to allow users to choose location
 	latitude := 37.7749
 	longitude := -122.4194
 
@@ -33,20 +32,36 @@ func main() {
 		log.Fatalf("Failed to fetch forecast: %v", err)
 	}
 
-	// Print temperature metrics
-	fmt.Println("\n=== Temperature Data for San Francisco ===")
-	fmt.Printf("Hourly Temperature: %.1f°F\n", forecast.Hourly.Temperature2m)
-	//fmt.Printf("Hourly dew point: %.1f°F\n", forecast.Hourly.DewPoint2m)
+	// Store metrics in database
+	if err := db.StoreMetrics(forecast); err != nil {
+		log.Fatalf("Failed to store metrics: %v", err)
+	}
 
+	// Detect anomalies
+	ad := detector.NewAnomalyDetector()
+	//forecast.Hourly.Temperature2m[0] = 100.0 // Inject an anomaly for testing
+	anomalies, err := ad.DetectAnomaliesInDataPoints(forecast.Hourly.Temperature2m)
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	// Print results
+	fmt.Println("=== Anomaly Detection Results for temperature only ===")
+	if len(anomalies) == 0 {
+		fmt.Println("No anomalies detected!")
+	} else {
+		fmt.Printf("Found %d anomalies:\n", len(anomalies))
+		for _, a := range anomalies {
+			fmt.Printf("  Index: %d | Value: %.2f | Z-Score: %.2f | Severity: %s\n",
+				a.Index, a.Value, a.ZScore, a.Severity)
+		}
+	}
+	// Start background data collection
+	//go startDataCollection(db, client, ad, latitude, longitude)
 	/*
-		// Initialize anomaly detector
-		anomalyDetector := detector.NewAnomalyDetector()
 
 		// Create HTTP server
 		httpServer := server.NewServer(db, client, anomalyDetector)
-
-		// Start background data collection
-		go startDataCollection(db, client, anomalyDetector)
 
 		// Start HTTP server
 		log.Println("Starting server on :8080")
@@ -57,13 +72,13 @@ func main() {
 }
 
 // startDataCollection periodically fetches data from the API
-func startDataCollection(db *database.DB, client *api.OpenMeteoClient, detector *detector.AnomalyDetector) {
+func startDataCollection(db *database.DB, client *api.OpenMeteoClient, detector *detector.AnomalyDetector, lat float64, long float64) {
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		log.Println("Fetching data from Open-Meteo API...")
-		forecast, err := client.GetForecast(35.6895, 139.6917)
+		forecast, err := client.GetForecast(lat, long)
 		if err != nil {
 			log.Printf("Failed to fetch forecast: %v", err)
 			continue

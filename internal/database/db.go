@@ -97,9 +97,7 @@ func (db *DB) StoreMetrics(forecast *models.Forecast) error {
 		value      float64
 	}{
 		{"temperature_2m", forecast.Current.Temperature2m},
-		{"relative_humidity_2m", float64(forecast.Current.RelativeHumidity2m)},
-		{"precipitation", forecast.Current.Precipitation},
-		{"wind_speed_10m", forecast.Current.WindSpeed10m},
+		{"dew_point_2m", forecast.Current.RelativeHumidity2m},
 	}
 
 	for _, m := range metrics {

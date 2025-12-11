@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"fmt"
 	"math"
 	"preempt/internal/models"
 	"time"
@@ -11,11 +12,57 @@ type AnomalyDetector struct {
 	zScoreThreshold float64 // Standard deviations from mean to flag as anomaly
 }
 
+// DataPointAnomaly represents an anomaly found in a list of data points
+type DataPointAnomaly struct {
+	Index    int     // Position in the original data slice
+	Value    float64 // The anomalous value
+	ZScore   float64 // How many standard deviations from mean
+	Severity string  // low, medium, high
+}
+
 // NewAnomalyDetector creates a new anomaly detector
 func NewAnomalyDetector() *AnomalyDetector {
 	return &AnomalyDetector{
 		zScoreThreshold: 2.0, // Flag values more than 2 std devs from mean
 	}
+}
+
+// DetectAnomaliesInDataPoints detects anomalies in a list of numbers using Z-score method
+func (ad *AnomalyDetector) DetectAnomaliesInDataPoints(dataPoints []float64) ([]DataPointAnomaly, error) {
+	if len(dataPoints) < 3 {
+		return nil, fmt.Errorf("need at least 3 data points for anomaly detection, got %d", len(dataPoints))
+	}
+
+	// Calculate mean
+	mean := calculateMean(dataPoints)
+
+	// Calculate standard deviation
+	stdDev := calculateStdDev(dataPoints, mean)
+
+	// If stdDev is 0, all values are the same - no anomalies
+	if stdDev == 0 {
+		return []DataPointAnomaly{}, nil
+	}
+
+	var anomalies []DataPointAnomaly
+
+	// Check each data point
+	for i, value := range dataPoints {
+		zScore := CalculateZScore(value, mean, stdDev)
+
+		// If Z-score exceeds threshold, it's an anomaly
+		if IsOutlier(zScore) {
+			severity := calculateSeverityFromZScore(zScore)
+			anomalies = append(anomalies, DataPointAnomaly{
+				Index:    i,
+				Value:    value,
+				ZScore:   zScore,
+				Severity: severity,
+			})
+		}
+	}
+
+	return anomalies, nil
 }
 
 // DetectAnomalies detects anomalies in the current forecast data
@@ -30,8 +77,6 @@ func (ad *AnomalyDetector) DetectAnomalies(forecast *models.Forecast) []models.A
 	}{
 		{"temperature_2m", forecast.Current.Temperature2m},
 		{"relative_humidity_2m", float64(forecast.Current.RelativeHumidity2m)},
-		{"precipitation", forecast.Current.Precipitation},
-		{"wind_speed_10m", forecast.Current.WindSpeed10m},
 	}
 
 	// For now, we use simple statistical detection
@@ -79,6 +124,17 @@ func (ad *AnomalyDetector) calculateSeverity(value float64) string {
 	if absValue > 10 {
 		return "high"
 	} else if absValue > 5 {
+		return "medium"
+	}
+	return "low"
+}
+
+// calculateSeverityFromZScore determines severity based on Z-score
+func calculateSeverityFromZScore(zScore float64) string {
+	absZScore := math.Abs(zScore)
+	if absZScore > 3.0 {
+		return "high"
+	} else if absZScore > 2.5 {
 		return "medium"
 	}
 	return "low"

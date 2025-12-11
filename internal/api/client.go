@@ -24,7 +24,7 @@ func NewOpenMeteoClient() *OpenMeteoClient {
 
 // GetForecast fetches forecast data for the given coordinates
 func (c *OpenMeteoClient) GetForecast(latitude, longitude float64) (*models.Forecast, error) {
-	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&hourly=temperature_2m,dew_point_2m&timezone=auto&temperature_unit=fahrenheit", baseURL, latitude, longitude)
+	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&hourly=temperature_2m,relative_humidity_2m&current=temperature_2m,relative_humidity_2m&timezone=auto&temperature_unit=fahrenheit", baseURL, latitude, longitude)
 	resp, err := c.client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch forecast: %w", err)

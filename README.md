@@ -6,16 +6,16 @@ Proactive alarm creation via anomaly detection from real-time metrics
 
 Preempt is a Go application that:
 1. **Fetches real-time weather data** from the Open-Meteo API (currently hardcoded to SF, will allow for any location later)
-2. **Stores metrics** in a MySQL database
-3. **Detects anomalies** using statistical methods (Z-score based) - will probably change to ML model
+2. **Stores metrics, anomalies, current alarms** in a MySQL database
+3. **Detects anomalies** using hybrid approach of statistical methods (Z-score based) and ML model
 4. **Suggests alarms** based on anomalies and patterns detected to prevent future issues
 
 ## Features
 
 - **Real-time Data Collection**: Automatically fetches weather forecast data every 15 minutes (can change frequency)
-- **Anomaly Detection**: Identifies unusual metric values using Z-score analysis (will change algorithm)
+- **Anomaly Detection**: Identifies unusual metric values using statistics and a ML model
 - **Alarm Suggestions**: Proposes preventive alarm thresholds based on detected patterns
-- **REST API**: Full-featured HTTP API for querying data and anomalies
+- **REST API**: Full-featured HTTP API for querying data and anomalies (need this once I add frontend)
 - **MySQL Database**: Persistent storage of metrics, anomalies, and alarm suggestions
 
 ## Project Structure
@@ -33,6 +33,9 @@ Preempt is a Go application that:
 │   ├── detector/
 │   │   ├── detector.go       # Anomaly detection algorithm
 │   │   └── suggester.go      # Alarm suggestion engine
+│   ├── ml/
+│   │   └── train.py         # Machine learning model
+│   │   └── infer.py
 │   ├── models/
 │   │   └── models.go         # Data structures
 │   └── server/
