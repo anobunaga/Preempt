@@ -28,14 +28,14 @@ type CurrentUnits struct {
 }
 
 type Current struct {
-	Time               string  `json:"time"`
-	Interval           int     `json:"interval"`
-	Temperature2m      float64 `json:"temperature_2m"`
-	RelativeHumidity2m float64 `json:"relative_humidity_2m"`
-	Precipitation      float64 `json:"precipitation"`
-	WeatherCode        int     `json:"weather_code"`
-	WindSpeed10m       float64 `json:"wind_speed_10m"`
-	DewPoint2m         float64 `json:"dew_point_2m"`
+	Time               string   `json:"time"`
+	Interval           int      `json:"interval"`
+	Temperature2m      *float64 `json:"temperature_2m"`
+	RelativeHumidity2m *float64 `json:"relative_humidity_2m"`
+	Precipitation      float64  `json:"precipitation"`
+	WeatherCode        int      `json:"weather_code"`
+	WindSpeed10m       float64  `json:"wind_speed_10m"`
+	DewPoint2m         float64  `json:"dew_point_2m"`
 }
 
 type HourlyUnits struct {
@@ -49,7 +49,7 @@ type HourlyUnits struct {
 type Hourly struct {
 	Time               []string  `json:"time"`
 	Temperature2m      []float64 `json:"temperature_2m"`
-	RelativeHumidity2m []int     `json:"relative_humidity_2m"`
+	RelativeHumidity2m []float64 `json:"relative_humidity_2m"`
 	Precipitation      []float64 `json:"precipitation"`
 	DewPoint2m         []float64 `json:"dew_point_2m"`
 }

@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"preempt/internal/models"
 	"time"
 
@@ -92,19 +93,50 @@ func (db *DB) initSchema() error {
 func (db *DB) StoreMetrics(forecast *models.Forecast) error {
 	now := time.Now()
 
-	metrics := []struct {
+	hourlyMetrics := []struct {
 		metricType string
-		value      float64
+		value      []float64
+	}{
+		{"temperature_2m", forecast.Hourly.Temperature2m},
+		{"dew_point_2m", forecast.Hourly.RelativeHumidity2m},
+	}
+
+	//insert hourly metrics
+	baseTime := time.Now()
+	for _, m := range hourlyMetrics {
+		for hourOffset, value := range m.value {
+			// Calculate timestamp for each hour
+			timestamp := baseTime.Add(time.Duration(hourOffset) * time.Hour)
+
+			query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
+			_, err := db.conn.Exec(query, timestamp, m.metricType, value)
+			if err != nil {
+				return fmt.Errorf("failed to store hourly metric %s at hour %d: %w",
+					m.metricType, hourOffset, err)
+			}
+		}
+	}
+
+	currentMetrics := []struct {
+		metricType string
+		value      *float64
 	}{
 		{"temperature_2m", forecast.Current.Temperature2m},
 		{"dew_point_2m", forecast.Current.RelativeHumidity2m},
 	}
 
-	for _, m := range metrics {
+	//insert current metrics (every 15 min)
+	for _, m := range currentMetrics {
+		if m.value == nil {
+			log.Printf("Skipping current %s - no data available", m.metricType)
+			continue
+		}
 		query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
 		_, err := db.conn.Exec(query, now, m.metricType, m.value)
 		if err != nil {
 			return fmt.Errorf("failed to store metric %s: %w", m.metricType, err)
+		} else {
+			log.Printf("Inputted current metric!")
 		}
 	}
 

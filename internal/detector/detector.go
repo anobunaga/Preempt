@@ -28,7 +28,9 @@ func NewAnomalyDetector() *AnomalyDetector {
 }
 
 // DetectAnomaliesInDataPoints detects anomalies in a list of numbers using Z-score method
-func (ad *AnomalyDetector) DetectAnomaliesInDataPoints(dataPoints []float64) ([]DataPointAnomaly, error) {
+func (ad *AnomalyDetector) DetectAnomaliesInDataPoints(forecast *models.Forecast) ([]DataPointAnomaly, error) {
+	//Modify this later to include relative humidity
+	dataPoints := forecast.Hourly.Temperature2m
 	if len(dataPoints) < 3 {
 		return nil, fmt.Errorf("need at least 3 data points for anomaly detection, got %d", len(dataPoints))
 	}
@@ -73,22 +75,22 @@ func (ad *AnomalyDetector) DetectAnomalies(forecast *models.Forecast) []models.A
 	// Check current metrics
 	metrics := []struct {
 		metricType string
-		value      float64
+		value      *float64
 	}{
 		{"temperature_2m", forecast.Current.Temperature2m},
-		{"relative_humidity_2m", float64(forecast.Current.RelativeHumidity2m)},
+		{"relative_humidity_2m", forecast.Current.RelativeHumidity2m},
 	}
 
 	// For now, we use simple statistical detection
 	// In a real system, these would be compared against historical data
 	for _, m := range metrics {
 		// Simple heuristic-based anomaly detection
-		if ad.isAnomalous(m.metricType, m.value) {
-			severity := ad.calculateSeverity(m.value)
+		if ad.isAnomalous(m.metricType, *m.value) {
+			severity := ad.calculateSeverity(*m.value)
 			anomalies = append(anomalies, models.Anomaly{
 				Timestamp:  now,
 				MetricType: m.metricType,
-				Value:      m.value,
+				Value:      *m.value,
 				ZScore:     0, // Would be calculated with historical data
 				Severity:   severity,
 			})

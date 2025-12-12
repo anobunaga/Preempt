@@ -62,7 +62,7 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	forecast, err := s.apiClient.GetForecast(37.7749, -122.4194)
+	forecast, err := s.apiClient.GetForecast(37.7749, -122.4194, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -166,7 +166,7 @@ func (s *Server) handleAlarmSuggestions(w http.ResponseWriter, r *http.Request) 
 
 // handleCurrent returns the current forecast
 func (s *Server) handleCurrent(w http.ResponseWriter, r *http.Request) {
-	forecast, err := s.apiClient.GetForecast(37.7749, -122.4194)
+	forecast, err := s.apiClient.GetForecast(37.7749, -122.4194, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
