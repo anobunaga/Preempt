@@ -13,3 +13,4 @@ preempt
 .env
 .env.local
 preempt
+/vendor
