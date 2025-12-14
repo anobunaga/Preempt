@@ -44,6 +44,15 @@ func main() {
 		log.Fatalf("Failed to store metrics: %v", err)
 	}
 
+	anomalies, err := ad.DetectAnomalies(db)
+	if err != nil {
+		log.Fatalf("Failed to detect anomalies: %v", err)
+	}
+
+	if err := db.StoreAnomalies(anomalies); err != nil {
+		log.Fatalf("Failed to store anomalies: %v", err)
+	}
+
 	go startDataCollection(db, client, ad, latitude, longitude)
 
 	quit := make(chan os.Signal, 1)

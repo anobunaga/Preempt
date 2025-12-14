@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"preempt/internal/models"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -144,7 +145,6 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, fields []string) err
 					fieldName, timestamps[i], err)
 			}
 		}
-		log.Printf("✓ Stored %d hourly records for %s", len(values), fieldName)
 	}
 
 	return nil
@@ -193,6 +193,43 @@ func (db *DB) StoreAnomaly(anomaly *models.Anomaly) error {
 	return err
 }
 
+func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
+	if len(anomalies) == 0 {
+		log.Printf("No anomalies")
+		return nil // Nothing to store
+	}
+
+	// Begin transaction for batch insert
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Will be ignored if committed
+
+	// Prepare statement
+	stmt, err := tx.Prepare(`INSERT INTO anomalies (timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	// Insert each anomaly
+	for _, anomaly := range anomalies {
+		_, err = stmt.Exec(anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
+		if err != nil {
+			return fmt.Errorf("failed to insert anomaly for %s at %s: %w", anomaly.MetricType, anomaly.Timestamp, err)
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Printf("✓ Stored %d anomalies", len(anomalies))
+	return nil
+}
+
 // StoreAlarmSuggestion stores an alarm suggestion
 func (db *DB) StoreAlarmSuggestion(suggestion *models.AlarmSuggestion) error {
 	query := `INSERT INTO alarm_suggestions (metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count) 
@@ -202,10 +239,40 @@ func (db *DB) StoreAlarmSuggestion(suggestion *models.AlarmSuggestion) error {
 	return err
 }
 
-// GetMetrics retrieves metrics for a given time range and metric type
-func (db *DB) GetMetrics(metricType string, since time.Time) ([]models.Metric, error) {
-	query := `SELECT id, timestamp, metric_type, value FROM metrics WHERE metric_type = ? AND timestamp >= ? ORDER BY timestamp DESC`
-	rows, err := db.conn.Query(query, metricType, since)
+// GetMetrics retrieves metrics for a given time range and metric types
+// If metricTypes is empty or nil, returns all metric types
+func (db *DB) GetMetrics(metricTypes []string, since time.Time) ([]models.Metric, error) {
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if len(metricTypes) == 1 {
+		// Get single specific metric type
+		query = `SELECT id, timestamp, metric_type, value FROM metrics WHERE metric_type = ? AND timestamp >= ? ORDER BY timestamp DESC`
+		rows, err = db.conn.Query(query, metricTypes[0], since)
+	} else {
+		// Get multiple metric types using IN clause
+		// Build placeholders: (?, ?, ?)
+		placeholders := make([]string, len(metricTypes))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+
+		query = fmt.Sprintf(
+			`SELECT id, timestamp, metric_type, value FROM metrics WHERE metric_type IN (%s) AND timestamp >= ? ORDER BY timestamp DESC`,
+			strings.Join(placeholders, ","),
+		)
+
+		// Build args: [type1, type2, type3, since]
+		args := make([]interface{}, len(metricTypes)+1)
+		for i, mt := range metricTypes {
+			args[i] = mt
+		}
+		args[len(metricTypes)] = since
+
+		rows, err = db.conn.Query(query, args...)
+	}
+
 	if err != nil {
 		return nil, err
 	}
