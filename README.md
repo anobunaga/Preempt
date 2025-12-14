@@ -4,18 +4,31 @@ Proactive alarm creation via anomaly detection from real-time metrics
 
 ## Overview
 
-Preempt is a Go application that:
-1. **Fetches real-time weather data** from the Open-Meteo API (currently hardcoded to SF, will allow for any location later)
-2. **Stores metrics, anomalies, current alarms** in a MySQL database
-3. **Detects anomalies** using hybrid approach of statistical methods (Z-score based) and ML model
-4. **Suggests alarms** based on anomalies and patterns detected to prevent future issues
+Preempt is a Go application with a **separated architecture** consisting of two independent services:
+
+1. **Weather Collector** (`cmd/weather_collector`): Background service that:
+   - Loads 7 days of historical hourly data on startup (bootstrap phase)
+   - Continuously fetches current weather data every 5 minutes
+   - Stores metrics in MySQL database
+   - Detects anomalies and suggests alarm thresholds
+
+2. **API Server** (`cmd/server`): HTTP REST API that:
+   - Serves queries for metrics, anomalies, and alarm suggestions
+   - Provides endpoint to manually fetch current weather data
+   - Offers health check and system status endpoints
+
+Both services operate on weather data from San Francisco (currently hardcoded, will support multiple locations later).
 
 ## Features
 
-- **Real-time Data Collection**: Automatically fetches weather forecast data every 15 minutes (can change frequency)
-- **Anomaly Detection**: Identifies unusual metric values using statistics and a ML model
-- **Alarm Suggestions**: Proposes preventive alarm thresholds based on detected patterns
-- **REST API**: Full-featured HTTP API for querying data and anomalies (need this once I add frontend)
+- **Separated Services**: Independent data collector and API server for better scalability
+- **YAML Configuration**: Easy configuration of monitored weather fields
+- **Historical Bootstrap**: Automatically loads past 7 days of hourly data on startup
+- **Real-time Monitoring**: Continuous weather data collection every 5 minutes
+- **Flexible API Client**: Configurable field selection for Open-Meteo API requests
+- **Anomaly Detection**: Hybrid approach using Z-score statistics and heuristic rules
+- **Alarm Suggestions**: Automatic threshold generation based on historical patterns
+- **REST API**: Full-featured HTTP API for querying data and anomalies
 - **MySQL Database**: Persistent storage of metrics, anomalies, and alarm suggestions
 
 ## Project Structure
@@ -23,26 +36,51 @@ Preempt is a Go application that:
 ```
 .
 ├── cmd/
+│   ├── weather_collector/
+│   │   └── main.go           # Background data collection service
 │   └── server/
-│       └── main.go           # Application entry point
+│       └── main.go           # HTTP API server
 ├── internal/
 │   ├── api/
-│   │   └── client.go         # Open-Meteo API client
+│   │   └── open_meteo_client.go  # Open-Meteo API client (flexible field selection)
+│   ├── config/
+│   │   └── config.go         # YAML configuration management
 │   ├── database/
 │   │   └── db.go             # MySQL database layer
 │   ├── detector/
 │   │   ├── detector.go       # Anomaly detection algorithm
 │   │   └── suggester.go      # Alarm suggestion engine
 │   ├── ml/
-│   │   └── train.py         # Machine learning model
-│   │   └── infer.py
+│   │   ├── train.py          # Machine learning model training
+│   │   └── infer.py          # ML model inference
 │   ├── models/
 │   │   └── models.go         # Data structures
 │   └── server/
-│       └── server.go         # HTTP server and endpoints
-├── go.mod                     # Go module definition
+│       └── server.go         # HTTP request handlers
+├── config.yaml               # Application configuration file
+├── go.mod
+├── go.sum
 └── README.md
 ```
+
+## Configuration
+
+The application uses a YAML configuration file (`config.yaml`) to manage monitored weather fields:
+
+```yaml
+weather:
+  monitored_fields:
+    - temperature_2m
+    - relative_humidity_2m
+    - precipitation
+    - wind_speed_10m
+    - dew_point_2m
+```
+
+These fields are used by:
+- Weather collector to determine what data to fetch and store
+- API server health endpoint to report what fields are being monitored
+- Database operations for storing and querying metrics
 
 ## Requirements
 
@@ -59,22 +97,84 @@ go mod download
 go mod tidy
 ```
 
-3. Build the application:
+3. Set up MySQL database:
 ```bash
-go build -o preempt ./cmd/server
+# Start MySQL (if not running)
+mysql.server start
+
+# Create database and tables
+mysql -u root -p
+```
+
+**Default database credentials:**
+- Username: `myapp`
+- Password: `mypassword123`
+- Database: `weather_db`
+
+4. Configure monitored fields in `config.yaml`:
+```yaml
+weather:
+  monitored_fields:
+    - temperature_2m
+    - relative_humidity_2m
+    - precipitation
+    - wind_speed_10m
+    - dew_point_2m
+```
+
+5. Build both services:
+```bash
+# Build weather collector
+go build -o weather_collector ./cmd/weather_collector
+
+# Build API server
+go build -o api_server ./cmd/server
 ```
 
 ## Usage
 
-### Running the Server
+### Running the Weather Collector
+
+The weather collector is a background service that continuously collects weather data:
 
 ```bash
-go run ./cmd/server
+go run ./cmd/weather_collector
 # or
-./preempt
+./weather_collector
 ```
 
-The server will start on `http://localhost:8080` and begin collecting data every 15 minutes.
+**What it does:**
+1. **Bootstrap Phase**: Loads past 7 days of hourly historical data using Open-Meteo Archive API
+2. **Monitoring Phase**: Fetches current weather every 5 minutes using Open-Meteo Forecast API
+3. **Detection**: Runs anomaly detection on all collected metrics
+4. **Suggestions**: Generates alarm threshold suggestions based on detected anomalies
+
+**Expected output:**
+```
+2025/12/08 10:00:00 Starting weather data collector...
+2025/12/08 10:00:00 Configuration loaded successfully
+2025/12/08 10:00:00 Monitored fields: [temperature_2m relative_humidity_2m precipitation wind_speed_10m dew_point_2m]
+2025/12/08 10:00:05 Bootstrap: Fetched 168 hours of historical data
+2025/12/08 10:00:05 Bootstrap complete. Starting real-time monitoring...
+2025/12/08 10:00:05 Monitoring goroutine started (fetch interval: 5 minutes)
+```
+
+### Running the API Server
+
+The API server provides HTTP endpoints for querying weather data:
+
+```bash
+go run ./cmd/server/main.go
+# or
+./api_server
+```
+
+The server will start on `http://localhost:8080`.
+
+**Expected output:**
+```
+2025/12/08 10:05:00 Server starting on :8080
+```
 
 ### API Endpoints
 
@@ -82,26 +182,46 @@ The server will start on `http://localhost:8080` and begin collecting data every
 ```bash
 GET /health
 ```
-Returns server status and current time.
 
-#### Fetch Data (Manual)
-```bash
-POST /fetch
-```
-Manually triggers a data fetch from the Open-Meteo API, stores metrics, and detects anomalies.
+Returns server status and list of monitored weather fields from configuration.
 
 **Response:**
 ```json
 {
-  "status": "success",
-  "anomalies": 0,
-  "timestamp": "2025-12-08T10:30:00Z",
-  "forecast": {
-    "temperature_2m": 15.2,
-    "relative_humidity_2m": 65,
-    "precipitation": 0.0,
-    "wind_speed_10m": 12.5
-  }
+    "status": "healthy",
+    "time": "2025-12-14 07:10:55.354398 +0000 UTC"
+}
+```
+
+#### Fetch Current Weather (Manual)
+```bash
+POST /fetch-current-weather
+Content-Type: application/json
+
+{
+  "latitude": 37.7749,
+  "longitude": -122.4194
+}
+```
+
+Manually triggers a fetch of current weather data from Open-Meteo API for specified coordinates.
+
+**Response:**
+```json
+{
+    "anomalies": 0,
+    "forecast": {
+        "time": "2025-12-13T23:00",
+        "interval": 900,
+        "temperature_2m": 47.3,
+        "relative_humidity_2m": 96,
+        "precipitation": 0,
+        "weather_code": 0,
+        "wind_speed_10m": 7.2,
+        "dew_point_2m": 46.2
+    },
+    "status": "success",
+    "timestamp": "2025-12-13T23:11:12.073126-08:00"
 }
 ```
 
@@ -181,13 +301,6 @@ Query parameters:
   ]
 }
 ```
-
-#### Get Current Forecast
-```bash
-GET /current
-```
-
-Returns the current weather forecast data from the Open-Meteo API.
 
 ## How It Works
 
