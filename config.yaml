@@ -1,0 +1,7 @@
+weather:
+  monitored_fields:
+    - temperature_2m
+    - relative_humidity_2m
+    - precipitation
+    - wind_speed_10m
+    - dew_point_2m

@@ -90,56 +90,99 @@ func (db *DB) initSchema() error {
 }
 
 // StoreMetrics stores all current metrics from the forecast
-func (db *DB) StoreMetrics(forecast *models.Forecast) error {
-	now := time.Now()
+func (db *DB) StoreMetrics(forecast *models.Forecast, fields []string, isInitial bool) error {
+	if isInitial {
+		return db.storeHourlyMetrics(forecast, fields)
+	}
+	return db.storeCurrentMetrics(forecast, fields)
+}
 
-	hourlyMetrics := []struct {
-		metricType string
-		value      []float64
-	}{
-		{"temperature_2m", forecast.Hourly.Temperature2m},
-		{"dew_point_2m", forecast.Hourly.RelativeHumidity2m},
+func (db *DB) storeHourlyMetrics(forecast *models.Forecast, fields []string) error {
+	if len(forecast.Hourly.Time) == 0 {
+		return fmt.Errorf("no hourly data in forecast")
 	}
 
-	//insert hourly metrics
-	baseTime := time.Now()
-	for _, m := range hourlyMetrics {
-		for hourOffset, value := range m.value {
-			// Calculate timestamp for each hour
-			timestamp := baseTime.Add(time.Duration(hourOffset) * time.Hour)
+	timestamps := forecast.Hourly.Time
 
-			query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
-			_, err := db.conn.Exec(query, timestamp, m.metricType, value)
-			if err != nil {
-				return fmt.Errorf("failed to store hourly metric %s at hour %d: %w",
-					m.metricType, hourOffset, err)
-			}
-		}
+	fieldData := map[string][]float64{
+		"temperature_2m":       forecast.Hourly.Temperature2m,
+		"relative_humidity_2m": forecast.Hourly.RelativeHumidity2m,
+		"precipitation":        forecast.Hourly.Precipitation,
+		"wind_speed_10m":       forecast.Hourly.WindSpeed10m,
+		"dew_point_2m":         forecast.Hourly.DewPoint2m,
 	}
 
-	currentMetrics := []struct {
-		metricType string
-		value      *float64
-	}{
-		{"temperature_2m", forecast.Current.Temperature2m},
-		{"dew_point_2m", forecast.Current.RelativeHumidity2m},
-	}
-
-	//insert current metrics (every 15 min)
-	for _, m := range currentMetrics {
-		if m.value == nil {
-			log.Printf("Skipping current %s - no data available", m.metricType)
+	for _, fieldName := range fields {
+		values, exists := fieldData[fieldName]
+		if !exists {
+			log.Printf("Warning: field %s not found in hourly data", fieldName)
 			continue
 		}
-		query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
-		_, err := db.conn.Exec(query, now, m.metricType, m.value)
-		if err != nil {
-			return fmt.Errorf("failed to store metric %s: %w", m.metricType, err)
-		} else {
-			log.Printf("Inputted current metric!")
+
+		if len(values) == 0 {
+			log.Printf("Skipping %s - no hourly data", fieldName)
+			continue
 		}
+
+		if len(values) != len(timestamps) {
+			log.Printf("Warning: %s has %d values but %d timestamps",
+				fieldName, len(values), len(timestamps))
+			continue
+		}
+
+		for i, value := range values {
+			timestamp, err := time.Parse("2006-01-02T15:04", timestamps[i])
+			if err != nil {
+				log.Printf("Failed to parse timestamp %s: %v", timestamps[i], err)
+				continue
+			}
+
+			query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
+			_, err = db.conn.Exec(query, timestamp, fieldName, value)
+			if err != nil {
+				return fmt.Errorf("failed to store hourly metric %s at %s: %w",
+					fieldName, timestamps[i], err)
+			}
+		}
+		log.Printf("✓ Stored %d hourly records for %s", len(values), fieldName)
 	}
 
+	return nil
+}
+
+func (db *DB) storeCurrentMetrics(forecast *models.Forecast, fields []string) error {
+	now := time.Now()
+
+	fieldData := map[string]*float64{
+		"temperature_2m":       forecast.Current.Temperature2m,
+		"relative_humidity_2m": forecast.Current.RelativeHumidity2m,
+		"precipitation":        forecast.Current.Precipitation,
+		"wind_speed_10m":       forecast.Current.WindSpeed10m,
+		"dew_point_2m":         forecast.Current.DewPoint2m,
+	}
+
+	storedCount := 0
+	for _, fieldName := range fields {
+		value, exists := fieldData[fieldName]
+		if !exists {
+			log.Printf("Warning: field %s not found in current data", fieldName)
+			continue
+		}
+
+		if value == nil {
+			log.Printf("Skipping %s - no current data", fieldName)
+			continue
+		}
+
+		query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
+		_, err := db.conn.Exec(query, now, fieldName, *value)
+		if err != nil {
+			return fmt.Errorf("failed to store current metric %s: %w", fieldName, err)
+		}
+		storedCount++
+	}
+
+	log.Printf("✓ Stored %d current metrics", storedCount)
 	return nil
 }
 
