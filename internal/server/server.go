@@ -2,14 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
-	"strconv"
-	"time"
-
 	"preempt/internal/api"
 	"preempt/internal/config"
 	"preempt/internal/database"
 	"preempt/internal/detector"
+	"strconv"
+	"time"
 )
 
 type FetchRequest struct {
@@ -96,7 +96,10 @@ func (s *Server) handleFetchCurrentWeather(w http.ResponseWriter, r *http.Reques
 	}
 
 	// can be asynchronous
-	anomalies := s.anomalyDetector.DetectAnomalies(forecast)
+	anomalies, err := s.anomalyDetector.DetectAnomalies(s.db)
+	if err != nil {
+		log.Fatalf("Failed to fetch anomalies: %v", err)
+	}
 	for _, anomaly := range anomalies {
 		if err := s.db.StoreAnomaly(&anomaly); err != nil {
 			continue
@@ -131,7 +134,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		allMetrics := make(map[string]interface{})
 
 		for _, field := range cfg.Weather.MonitoredFields {
-			metrics, err := s.db.GetMetrics(field, since)
+			metrics, err := s.db.GetMetrics([]string{field}, since)
 			if err != nil {
 				continue
 			}
@@ -150,7 +153,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get specific metric type
-	metrics, err := s.db.GetMetrics(metricType, since)
+	metrics, err := s.db.GetMetrics([]string{metricType}, since)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

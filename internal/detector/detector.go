@@ -1,8 +1,14 @@
 package detector
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"math"
+	"os"
+	"os/exec"
+	"preempt/internal/config"
+	"preempt/internal/database"
 	"preempt/internal/models"
 	"time"
 )
@@ -10,133 +16,220 @@ import (
 // AnomalyDetector detects anomalies in metrics data
 type AnomalyDetector struct {
 	zScoreThreshold float64 // Standard deviations from mean to flag as anomaly
+	cfg             *config.Config
 }
 
-// DataPointAnomaly represents an anomaly found in a list of data points
-type DataPointAnomaly struct {
-	Index    int     // Position in the original data slice
-	Value    float64 // The anomalous value
-	ZScore   float64 // How many standard deviations from mean
-	Severity string  // low, medium, high
+// MLAnomalyResult represents the JSON output from the Python ML script
+type MLAnomalyResult struct {
+	ModelsSaved         int             `json:"models_saved"`
+	TotalAnomaliesFound int             `json:"total_anomalies_found"`
+	Anomalies           []MLAnomalyData `json:"anomalies"`
+	MetricsProcessed    []string        `json:"metrics_processed"`
+}
+
+type MLAnomalyData struct {
+	Timestamp    string  `json:"timestamp"`
+	MetricType   string  `json:"metric_type"`
+	Value        float64 `json:"value"`
+	AnomalyScore float64 `json:"anomaly_score"`
+	Severity     string  `json:"severity"`
 }
 
 // NewAnomalyDetector creates a new anomaly detector
 func NewAnomalyDetector() *AnomalyDetector {
 	return &AnomalyDetector{
 		zScoreThreshold: 2.0, // Flag values more than 2 std devs from mean
+		cfg:             config.Get(),
 	}
 }
 
-// DetectAnomaliesInDataPoints detects anomalies in a list of numbers using Z-score method
-func (ad *AnomalyDetector) DetectAnomaliesInDataPoints(forecast *models.Forecast) ([]DataPointAnomaly, error) {
-	//Modify this later to include relative humidity
-	dataPoints := forecast.Hourly.Temperature2m
-	if len(dataPoints) < 3 {
-		return nil, fmt.Errorf("need at least 3 data points for anomaly detection, got %d", len(dataPoints))
+// DetectAnomalies detects anomalies by querying historical metrics from the database and using z score and ML model
+func (ad *AnomalyDetector) DetectAnomalies(db *database.DB) ([]models.Anomaly, error) {
+
+	stats_anomalies, err := ad.getStatsAnomalies(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anomalies via stats method %s", err)
+	}
+	ml_anomalies, err := ad.getMLAnomalies(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anomalies via machine learning model method %s", err)
 	}
 
-	// Calculate mean
-	mean := calculateMean(dataPoints)
+	//combine with stats z-score anomalies and return total list
+	anomalies := append(stats_anomalies, ml_anomalies...)
 
-	// Calculate standard deviation
-	stdDev := calculateStdDev(dataPoints, mean)
+	return anomalies, nil
+}
 
-	// If stdDev is 0, all values are the same - no anomalies
-	if stdDev == 0 {
-		return []DataPointAnomaly{}, nil
+func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly, error) {
+	var anomalies []models.Anomaly
+	now := time.Now()
+
+	// Define metric types list
+	metricTypes := ad.cfg.Weather.MonitoredFields
+
+	// Get historical data for the last 7 days
+	since := now.AddDate(0, 0, -7)
+	metrics, err := db.GetMetrics(metricTypes, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metrics %w", err)
 	}
 
-	var anomalies []DataPointAnomaly
+	// Group metrics by type
+	metricsByType := make(map[string][]models.Metric)
+	for _, m := range metrics {
+		metricsByType[m.MetricType] = append(metricsByType[m.MetricType], m)
+	}
 
-	// Check each data point
-	for i, value := range dataPoints {
-		zScore := CalculateZScore(value, mean, stdDev)
+	// Get recent metrics (last 24 hours) - single query
+	recentSince := now.Add(-24 * time.Hour)
+	recentMetrics, err := db.GetMetrics(metricTypes, recentSince)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent metrics: %w", err)
+	}
 
-		// If Z-score exceeds threshold, it's an anomaly
-		if IsOutlier(zScore) {
-			severity := calculateSeverityFromZScore(zScore)
-			anomalies = append(anomalies, DataPointAnomaly{
-				Index:    i,
-				Value:    value,
-				ZScore:   zScore,
-				Severity: severity,
-			})
+	// Group recent metrics by type
+	recentByType := make(map[string][]models.Metric)
+	for _, m := range recentMetrics {
+		recentByType[m.MetricType] = append(recentByType[m.MetricType], m)
+	}
+
+	// Process each metric type independently
+	for _, metricType := range metricTypes {
+		metrics := metricsByType[metricType]
+
+		if len(metrics) < 3 {
+			log.Printf("Warning: not enough data for %s (%d samples)", metricType, len(metrics))
+			continue // Not enough data for statistical analysis
 		}
+
+		// Extract values for THIS metric type
+		var values []float64
+		for _, m := range metrics {
+			values = append(values, m.Value)
+		}
+
+		// Calculate mean and std dev for THIS metric type
+		mean := calculateMean(values)
+		stdDev := calculateStdDev(values, mean)
+
+		log.Printf("  %s: mean=%.2f, stdDev=%.2f, samples=%d", metricType, mean, stdDev, len(values))
+
+		if stdDev == 0 {
+			log.Printf("  %s: no variation in data, skipping", metricType)
+			continue // No variation, no anomalies
+		}
+
+		// Get recent metrics for THIS metric type
+		recentForType := recentByType[metricType]
+
+		// Check each recent metric against THIS metric type's statistics from past 7 days
+		anomalyCount := 0
+		for _, m := range recentForType {
+			zScore := CalculateZScore(m.Value, mean, stdDev)
+			if IsOutlier(zScore) {
+				severity := calculateSeverityFromZScore(zScore)
+				anomalies = append(anomalies, models.Anomaly{
+					Timestamp:  m.Timestamp,
+					MetricType: metricType,
+					Value:      m.Value,
+					ZScore:     zScore,
+					Severity:   severity,
+				})
+				anomalyCount++
+			}
+		}
+
+		log.Printf("  %s: found %d anomalies", metricType, anomalyCount)
 	}
 
 	return anomalies, nil
 }
 
-// DetectAnomalies detects anomalies in the current forecast data
-func (ad *AnomalyDetector) DetectAnomalies(forecast *models.Forecast) []models.Anomaly {
+func (ad *AnomalyDetector) getMLAnomalies(db *database.DB) ([]models.Anomaly, error) {
 	var anomalies []models.Anomaly
-	now := time.Now()
+	// Export data to a temporary CSV file for Python to read
+	tempFile, err := os.Create("metrics.csv")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name()) // Clean up
+	defer tempFile.Close()
+	fmt.Println("CSV file created at:", tempFile.Name())
 
-	// Check current metrics
-	metrics := []struct {
-		metricType string
-		value      *float64
-	}{
-		{"temperature_2m", forecast.Current.Temperature2m},
-		{"relative_humidity_2m", forecast.Current.RelativeHumidity2m},
+	// Write CSV header
+	if _, err := tempFile.WriteString("timestamp,metric_type,value\n"); err != nil {
+		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
 
-	// For now, we use simple statistical detection
-	// In a real system, these would be compared against historical data
+	// Get all metrics from the last 30 days
+	metricTypes := ad.cfg.Weather.MonitoredFields
+	since := time.Now().AddDate(0, 0, -30)
+	metrics, err := db.GetMetrics(metricTypes, since) // Get all metric types
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metrics: %w", err)
+	}
+
+	if len(metrics) < 10 {
+		log.Printf("Not enough data for ML training (need at least 10, got %d)", len(metrics))
+		return anomalies, nil // Return empty list, not an error
+	}
+
+	// Write metrics to CSV
 	for _, m := range metrics {
-		// Simple heuristic-based anomaly detection
-		if ad.isAnomalous(m.metricType, *m.value) {
-			severity := ad.calculateSeverity(*m.value)
-			anomalies = append(anomalies, models.Anomaly{
-				Timestamp:  now,
-				MetricType: m.metricType,
-				Value:      *m.value,
-				ZScore:     0, // Would be calculated with historical data
-				Severity:   severity,
-			})
+		line := fmt.Sprintf("%s,%s,%.2f\n", m.Timestamp.Format(time.RFC3339), m.MetricType, m.Value)
+		if _, err := tempFile.WriteString(line); err != nil {
+			return nil, fmt.Errorf("failed to write metric: %w", err)
 		}
 	}
+	tempFile.Close()
 
-	return anomalies
-}
-
-// isAnomalous checks if a metric value is anomalous using heuristics
-func (ad *AnomalyDetector) isAnomalous(metricType string, value float64) bool {
-	switch metricType {
-	case "temperature_2m":
-		// Flag extreme temperatures (< -40 or > 60 Celsius)
-		return value < -40 || value > 60
-	case "relative_humidity_2m":
-		// Flag if humidity is 0 or 100 (invalid readings)
-		return value <= 0 || value >= 100
-	case "precipitation":
-		// Flag if precipitation is negative (impossible)
-		return value < 0
-	case "wind_speed_10m":
-		// Flag if wind speed is > 200 km/h (hurricane force)
-		return value > 200
-	default:
-		return false
+	// Run the Python script and capture output
+	cmd := exec.Command("python3", "internal/ml/train.py", tempFile.Name())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to run train.py: %w, output: %s", err, string(output))
 	}
-}
 
-// calculateSeverity determines the severity of an anomaly
-func (ad *AnomalyDetector) calculateSeverity(value float64) string {
-	absValue := math.Abs(value)
-	if absValue > 10 {
-		return "high"
-	} else if absValue > 5 {
-		return "medium"
+	log.Printf("ML model output: %s", string(output))
+
+	// Parse the JSON output from Python
+	var result MLAnomalyResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse ML output as JSON: %w, output: %s", err, string(output))
 	}
-	return "low"
+
+	log.Printf("ML processed %d metric types and found %d total anomalies", result.ModelsSaved, result.TotalAnomaliesFound)
+	log.Printf("Metrics processed: %v", result.MetricsProcessed)
+
+	// Convert ML anomalies to our Anomaly model
+	for _, mlAnomaly := range result.Anomalies {
+		// Parse timestamp
+		timestamp, err := time.Parse(time.RFC3339, mlAnomaly.Timestamp)
+		if err != nil {
+			log.Printf("Failed to parse timestamp %s: %v", mlAnomaly.Timestamp, err)
+			continue
+		}
+
+		anomaly := models.Anomaly{
+			Timestamp:  timestamp,
+			MetricType: mlAnomaly.MetricType,
+			Value:      mlAnomaly.Value,
+			ZScore:     mlAnomaly.AnomalyScore, // Use anomaly score as Z-score equivalent
+			Severity:   mlAnomaly.Severity,
+		}
+		anomalies = append(anomalies, anomaly)
+	}
+
+	return anomalies, nil
 }
 
 // calculateSeverityFromZScore determines severity based on Z-score
 func calculateSeverityFromZScore(zScore float64) string {
 	absZScore := math.Abs(zScore)
-	if absZScore > 3.0 {
+	if absZScore > 2.0 {
 		return "high"
-	} else if absZScore > 2.5 {
+	} else if absZScore > 1.5 {
 		return "medium"
 	}
 	return "low"
@@ -152,5 +245,5 @@ func CalculateZScore(value, mean, stdDev float64) float64 {
 
 // IsOutlier checks if a Z-score indicates an outlier (> 2 std devs from mean)
 func IsOutlier(zScore float64) bool {
-	return math.Abs(zScore) > 2.0
+	return math.Abs(zScore) > 1.0
 }
