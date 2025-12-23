@@ -19,7 +19,7 @@ func NewAlarmSuggester() *AlarmSuggester {
 }
 
 // SuggestAlarms analyzes anomalies and suggests alarms to prevent future issues
-func (as *AlarmSuggester) SuggestAlarms(anomalies []models.Anomaly) []models.AlarmSuggestion {
+func (as *AlarmSuggester) SuggestAlarms(anomalies []models.Anomaly, location string) []models.AlarmSuggestion {
 	if len(anomalies) == 0 {
 		return nil
 	}
@@ -34,7 +34,7 @@ func (as *AlarmSuggester) SuggestAlarms(anomalies []models.Anomaly) []models.Ala
 
 	for metricType, typeAnomalies := range anomaliesByType {
 		if len(typeAnomalies) >= as.minAnomaliesForSuggestion {
-			suggestion := as.generateSuggestion(metricType, typeAnomalies)
+			suggestion := as.generateSuggestion(metricType, typeAnomalies, location)
 			if suggestion != nil {
 				suggestions = append(suggestions, *suggestion)
 			}
@@ -45,7 +45,7 @@ func (as *AlarmSuggester) SuggestAlarms(anomalies []models.Anomaly) []models.Ala
 }
 
 // generateSuggestion creates an alarm suggestion for a metric with repeated anomalies
-func (as *AlarmSuggester) generateSuggestion(metricType string, anomalies []models.Anomaly) *models.AlarmSuggestion {
+func (as *AlarmSuggester) generateSuggestion(metricType string, anomalies []models.Anomaly, location string) *models.AlarmSuggestion {
 	if len(anomalies) == 0 {
 		return nil
 	}
@@ -116,6 +116,7 @@ func (as *AlarmSuggester) generateSuggestion(metricType string, anomalies []mode
 	confidence := as.calculateConfidence(values, threshold, operator)
 
 	return &models.AlarmSuggestion{
+		Location:     location,
 		MetricType:   metricType,
 		Threshold:    threshold,
 		Operator:     operator,

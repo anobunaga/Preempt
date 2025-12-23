@@ -1,5 +1,15 @@
 // Types for the Preempt API
 
+export interface Location {
+  Name: string;
+  Latitude: number;
+  Longitude: number;
+}
+
+export interface LocationsResponse {
+  locations: Location[];
+}
+
 export interface HealthResponse {
   status: string;
   time: string;
@@ -34,6 +44,7 @@ export interface Metric {
 }
 
 export interface MetricsResponse {
+  location?: string;
   hours?: number;
   metric_type?: string;
   count?: number;
@@ -51,6 +62,7 @@ export interface Anomaly {
 }
 
 export interface AnomaliesResponse {
+  location?: string;
   count: number;
   anomalies: any[];
 }
@@ -63,6 +75,7 @@ export interface AlarmSuggestion {
 }
 
 export interface AlarmSuggestionsResponse {
+  location?: string;
   count: number;
   suggestions: any[];
 }

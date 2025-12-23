@@ -76,6 +76,7 @@ type Daily struct {
 // Metric represents a single stored metric
 type Metric struct {
 	ID         int64     `json:"id"`
+	Location   string    `json:"location"`
 	Timestamp  time.Time `json:"timestamp"`
 	MetricType string    `json:"metric_type"`
 	Value      float64   `json:"value"`
@@ -84,6 +85,7 @@ type Metric struct {
 // Anomaly represents a detected anomaly
 type Anomaly struct {
 	ID         int64     `json:"id"`
+	Location   string    `json:"location"`
 	Timestamp  time.Time `json:"timestamp"`
 	MetricType string    `json:"metric_type"`
 	Value      float64   `json:"value"`
@@ -94,6 +96,7 @@ type Anomaly struct {
 // AlarmSuggestion represents a suggested alarm rule
 type AlarmSuggestion struct {
 	ID           int64     `json:"id"`
+	Location     string    `json:"location"`
 	MetricType   string    `json:"metric_type"`
 	Threshold    float64   `json:"threshold"`
 	Operator     string    `json:"operator"` // ">", "<", "=="

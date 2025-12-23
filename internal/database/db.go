@@ -51,33 +51,39 @@ func (db *DB) initSchema() error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS metrics (
 			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			location VARCHAR(255) NOT NULL DEFAULT '',
 			timestamp DATETIME(6) NOT NULL,
 			metric_type VARCHAR(100) NOT NULL,
 			value DOUBLE NOT NULL,
 			INDEX idx_metrics_timestamp (timestamp),
-			INDEX idx_metrics_type (metric_type)
+			INDEX idx_metrics_type (metric_type),
+			INDEX idx_metrics_location (location)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
 		`CREATE TABLE IF NOT EXISTS anomalies (
 			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			location VARCHAR(255) NOT NULL DEFAULT '',
 			timestamp DATETIME(6) NOT NULL,
 			metric_type VARCHAR(100) NOT NULL,
 			value DOUBLE NOT NULL,
 			z_score DOUBLE NOT NULL,
 			severity VARCHAR(50) NOT NULL,
 			INDEX idx_anomalies_timestamp (timestamp),
-			INDEX idx_anomalies_type (metric_type)
+			INDEX idx_anomalies_type (metric_type),
+			INDEX idx_anomalies_location (location)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
 		`CREATE TABLE IF NOT EXISTS alarm_suggestions (
 			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			location VARCHAR(255) NOT NULL DEFAULT '',
 			metric_type VARCHAR(100) NOT NULL,
 			threshold DOUBLE NOT NULL,
 			operator VARCHAR(10) NOT NULL,
 			suggested_at DATETIME(6) NOT NULL,
 			confidence DOUBLE NOT NULL,
 			description TEXT NOT NULL,
-			anomaly_count INT NOT NULL
+			anomaly_count INT NOT NULL,
+			INDEX idx_alarm_suggestions_location (location)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 
@@ -91,14 +97,14 @@ func (db *DB) initSchema() error {
 }
 
 // StoreMetrics stores all current metrics from the forecast
-func (db *DB) StoreMetrics(forecast *models.Forecast, fields []string, isInitial bool) error {
+func (db *DB) StoreMetrics(forecast *models.Forecast, location string, fields []string, isInitial bool) error {
 	if isInitial {
-		return db.storeHourlyMetrics(forecast, fields)
+		return db.storeHourlyMetrics(forecast, location, fields)
 	}
-	return db.storeCurrentMetrics(forecast, fields)
+	return db.storeCurrentMetrics(forecast, location, fields)
 }
 
-func (db *DB) storeHourlyMetrics(forecast *models.Forecast, fields []string) error {
+func (db *DB) storeHourlyMetrics(forecast *models.Forecast, location string, fields []string) error {
 	if len(forecast.Hourly.Time) == 0 {
 		return fmt.Errorf("no hourly data in forecast")
 	}
@@ -138,8 +144,8 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, fields []string) err
 				continue
 			}
 
-			query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
-			_, err = db.conn.Exec(query, timestamp, fieldName, value)
+			query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+			_, err = db.conn.Exec(query, location, timestamp, fieldName, value)
 			if err != nil {
 				return fmt.Errorf("failed to store hourly metric %s at %s: %w",
 					fieldName, timestamps[i], err)
@@ -150,7 +156,7 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, fields []string) err
 	return nil
 }
 
-func (db *DB) storeCurrentMetrics(forecast *models.Forecast, fields []string) error {
+func (db *DB) storeCurrentMetrics(forecast *models.Forecast, location string, fields []string) error {
 	now := time.Now()
 
 	fieldData := map[string]*float64{
@@ -174,8 +180,8 @@ func (db *DB) storeCurrentMetrics(forecast *models.Forecast, fields []string) er
 			continue
 		}
 
-		query := `INSERT INTO metrics (timestamp, metric_type, value) VALUES (?, ?, ?)`
-		_, err := db.conn.Exec(query, now, fieldName, *value)
+		query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+		_, err := db.conn.Exec(query, location, now, fieldName, *value)
 		if err != nil {
 			return fmt.Errorf("failed to store current metric %s: %w", fieldName, err)
 		}
@@ -188,8 +194,8 @@ func (db *DB) storeCurrentMetrics(forecast *models.Forecast, fields []string) er
 
 // StoreAnomaly stores a detected anomaly
 func (db *DB) StoreAnomaly(anomaly *models.Anomaly) error {
-	query := `INSERT INTO anomalies (timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?)`
-	_, err := db.conn.Exec(query, anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
+	query := `INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := db.conn.Exec(query, anomaly.Location, anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
 	return err
 }
 
@@ -207,7 +213,7 @@ func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
 	defer tx.Rollback() // Will be ignored if committed
 
 	// Prepare statement
-	stmt, err := tx.Prepare(`INSERT INTO anomalies (timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -215,7 +221,7 @@ func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
 
 	// Insert each anomaly
 	for _, anomaly := range anomalies {
-		_, err = stmt.Exec(anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
+		_, err = stmt.Exec(anomaly.Location, anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
 		if err != nil {
 			return fmt.Errorf("failed to insert anomaly for %s at %s: %w", anomaly.MetricType, anomaly.Timestamp, err)
 		}
@@ -232,24 +238,24 @@ func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
 
 // StoreAlarmSuggestion stores an alarm suggestion
 func (db *DB) StoreAlarmSuggestion(suggestion *models.AlarmSuggestion) error {
-	query := `INSERT INTO alarm_suggestions (metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count) 
-	          VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := db.conn.Exec(query, suggestion.MetricType, suggestion.Threshold, suggestion.Operator, suggestion.SuggestedAt,
+	query := `INSERT INTO alarm_suggestions (location, metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count) 
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := db.conn.Exec(query, suggestion.Location, suggestion.MetricType, suggestion.Threshold, suggestion.Operator, suggestion.SuggestedAt,
 		suggestion.Confidence, suggestion.Description, suggestion.AnomalyCount)
 	return err
 }
 
-// GetMetrics retrieves metrics for a given time range and metric types
-// If metricTypes is empty or nil, returns all metric types
-func (db *DB) GetMetrics(metricTypes []string, since time.Time) ([]models.Metric, error) {
+// GetMetrics retrieves metrics for a given time range, location, and metric types
+// If metricTypes is empty or nil, returns all metric types for the location
+func (db *DB) GetMetrics(location string, metricTypes []string, since time.Time) ([]models.Metric, error) {
 	var query string
 	var rows *sql.Rows
 	var err error
 
 	if len(metricTypes) == 1 {
 		// Get single specific metric type
-		query = `SELECT id, timestamp, metric_type, value FROM metrics WHERE metric_type = ? AND timestamp >= ? ORDER BY timestamp DESC`
-		rows, err = db.conn.Query(query, metricTypes[0], since)
+		query = `SELECT id, location, timestamp, metric_type, value FROM metrics WHERE location = ? AND metric_type = ? AND timestamp >= ? ORDER BY timestamp DESC`
+		rows, err = db.conn.Query(query, location, metricTypes[0], since)
 	} else {
 		// Get multiple metric types using IN clause
 		// Build placeholders: (?, ?, ?)
@@ -259,16 +265,17 @@ func (db *DB) GetMetrics(metricTypes []string, since time.Time) ([]models.Metric
 		}
 
 		query = fmt.Sprintf(
-			`SELECT id, timestamp, metric_type, value FROM metrics WHERE metric_type IN (%s) AND timestamp >= ? ORDER BY timestamp DESC`,
+			`SELECT id, location, timestamp, metric_type, value FROM metrics WHERE location = ? AND metric_type IN (%s) AND timestamp >= ? ORDER BY timestamp DESC`,
 			strings.Join(placeholders, ","),
 		)
 
-		// Build args: [type1, type2, type3, since]
-		args := make([]interface{}, len(metricTypes)+1)
+		// Build args: [location, type1, type2, type3, since]
+		args := make([]interface{}, len(metricTypes)+2)
+		args[0] = location
 		for i, mt := range metricTypes {
-			args[i] = mt
+			args[i+1] = mt
 		}
-		args[len(metricTypes)] = since
+		args[len(metricTypes)+1] = since
 
 		rows, err = db.conn.Query(query, args...)
 	}
@@ -281,7 +288,7 @@ func (db *DB) GetMetrics(metricTypes []string, since time.Time) ([]models.Metric
 	var metrics []models.Metric
 	for rows.Next() {
 		var m models.Metric
-		if err := rows.Scan(&m.ID, &m.Timestamp, &m.MetricType, &m.Value); err != nil {
+		if err := rows.Scan(&m.ID, &m.Location, &m.Timestamp, &m.MetricType, &m.Value); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -290,10 +297,10 @@ func (db *DB) GetMetrics(metricTypes []string, since time.Time) ([]models.Metric
 	return metrics, rows.Err()
 }
 
-// GetAnomalies retrieves recent anomalies
-func (db *DB) GetAnomalies(limit int) ([]models.Anomaly, error) {
-	query := `SELECT id, timestamp, metric_type, value, z_score, severity FROM anomalies ORDER BY timestamp DESC LIMIT ?`
-	rows, err := db.conn.Query(query, limit)
+// GetAnomalies retrieves recent anomalies for a specific location
+func (db *DB) GetAnomalies(location string, limit int) ([]models.Anomaly, error) {
+	query := `SELECT id, location, timestamp, metric_type, value, z_score, severity FROM anomalies WHERE location = ? ORDER BY timestamp DESC LIMIT ?`
+	rows, err := db.conn.Query(query, location, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +309,7 @@ func (db *DB) GetAnomalies(limit int) ([]models.Anomaly, error) {
 	var anomalies []models.Anomaly
 	for rows.Next() {
 		var a models.Anomaly
-		if err := rows.Scan(&a.ID, &a.Timestamp, &a.MetricType, &a.Value, &a.ZScore, &a.Severity); err != nil {
+		if err := rows.Scan(&a.ID, &a.Location, &a.Timestamp, &a.MetricType, &a.Value, &a.ZScore, &a.Severity); err != nil {
 			return nil, err
 		}
 		anomalies = append(anomalies, a)
@@ -311,10 +318,10 @@ func (db *DB) GetAnomalies(limit int) ([]models.Anomaly, error) {
 	return anomalies, rows.Err()
 }
 
-// GetAlarmSuggestions retrieves alarm suggestions
-func (db *DB) GetAlarmSuggestions(limit int) ([]models.AlarmSuggestion, error) {
-	query := `SELECT id, metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count FROM alarm_suggestions ORDER BY confidence DESC, suggested_at DESC LIMIT ?`
-	rows, err := db.conn.Query(query, limit)
+// GetAlarmSuggestions retrieves alarm suggestions for a specific location
+func (db *DB) GetAlarmSuggestions(location string, limit int) ([]models.AlarmSuggestion, error) {
+	query := `SELECT id, location, metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count FROM alarm_suggestions WHERE location = ? ORDER BY confidence DESC, suggested_at DESC LIMIT ?`
+	rows, err := db.conn.Query(query, location, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +330,7 @@ func (db *DB) GetAlarmSuggestions(limit int) ([]models.AlarmSuggestion, error) {
 	var suggestions []models.AlarmSuggestion
 	for rows.Next() {
 		var s models.AlarmSuggestion
-		if err := rows.Scan(&s.ID, &s.MetricType, &s.Threshold, &s.Operator, &s.SuggestedAt, &s.Confidence, &s.Description, &s.AnomalyCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.Location, &s.MetricType, &s.Threshold, &s.Operator, &s.SuggestedAt, &s.Confidence, &s.Description, &s.AnomalyCount); err != nil {
 			return nil, err
 		}
 		suggestions = append(suggestions, s)
@@ -340,17 +347,17 @@ func (db *DB) Close() error {
 	return nil
 }
 
-// GetMetricStats returns statistical information about a metric
-func (db *DB) GetMetricStats(metricType string, since time.Time) (mean, stdDev float64, count int, err error) {
+// GetMetricStats returns statistical information about a metric for a specific location
+func (db *DB) GetMetricStats(location string, metricType string, since time.Time) (mean, stdDev float64, count int, err error) {
 	query := `
 	SELECT 
 		COUNT(*) as count,
 		AVG(value) as mean,
 		STDDEV_POP(value) as stddev
 	FROM metrics 
-	WHERE metric_type = ? AND timestamp >= ?
+	WHERE location = ? AND metric_type = ? AND timestamp >= ?
 	`
-	row := db.conn.QueryRow(query, metricType, since)
+	row := db.conn.QueryRow(query, location, metricType, since)
 	err = row.Scan(&count, &mean, &stdDev)
 	return
 }

@@ -8,6 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type Location struct {
+	Name      string  `yaml:"name"`
+	Latitude  float64 `yaml:"latitude"`
+	Longitude float64 `yaml:"longitude"`
+}
+
 var (
 	instance *Config
 	once     sync.Once
@@ -18,6 +24,13 @@ type Config struct {
 	Weather struct {
 		MonitoredFields []string `yaml:"monitored_fields"`
 	} `yaml:"weather"`
+	Redis struct {
+		Addr     string `yaml:"addr"`
+		Password string `yaml:"password"`
+		DB       int    `yaml:"db"`
+		Stream   string `yaml:"stream"`
+	} `yaml:"redis"`
+	Locations []Location `yaml:"locations"`
 }
 
 func Load(configPath string) (*Config, error) {
