@@ -4,381 +4,202 @@ Proactive alarm creation via anomaly detection from real-time metrics
 
 ## Overview
 
-Preempt is a Go application with a **separated architecture** consisting of two independent services:
+Preempt is a distributed weather monitoring system with a **microservices architecture**:
 
-1. **Weather Collector** (`cmd/weather_collector`): Background service that:
-   - Loads 7 days of historical hourly data on startup (bootstrap phase)
-   - Continuously fetches current weather data every 5 minutes
-   - Stores metrics in MySQL database
-   - Detects anomalies and suggests alarm thresholds
+**Backend Services:**
+1. **Collect** - Fetches weather data (7 days historical on startup, then every 5 minutes) and publishes to Redis
+2. **Store** - Consumes Redis stream and persists to MySQL
+3. **Detect** - Runs anomaly detection every 10 minutes using hybrid statistical + ML approach, generates alarm suggestions
+4. **Server** - REST API for querying metrics, anomalies, and suggestions
 
-2. **API Server** (`cmd/server`): HTTP REST API that:
-   - Serves queries for metrics, anomalies, and alarm suggestions
-   - Provides endpoint to manually fetch current weather data
-   - Offers health check and system status endpoints
+**Frontend:**
+- React dashboard with location selection, metric visualization, and anomaly display
 
-Both services operate on weather data from San Francisco (currently hardcoded, will support multiple locations later).
+**Data Pipeline:**
+Replace with visual diagram later
+```
+Open-Meteo API → Collect → Redis Stream → Store → MySQL
+                                            ↓
+                                         Detect → Anomalies/Suggestions
+                                                       ↓
+                                          Frontend ← Server ← MySQL
+```
 
 ## Features
 
-- **Separated Services**: Independent data collector and API server for better scalability
-- **YAML Configuration**: Easy configuration of monitored weather fields
-- **Historical Bootstrap**: Automatically loads past 7 days of hourly data on startup
-- **Real-time Monitoring**: Continuous weather data collection every 5 minutes
-- **Flexible API Client**: Configurable field selection for Open-Meteo API requests
-- **Anomaly Detection**: Hybrid approach using Z-score statistics and heuristic rules
-- **Alarm Suggestions**: Automatic threshold generation based on historical patterns
-- **REST API**: Full-featured HTTP API for querying data and anomalies
-- **MySQL Database**: Persistent storage of metrics, anomalies, and alarm suggestions
+- **Microservices Architecture** - Decoupled services via Redis streams
+- **Hybrid Anomaly Detection** - Statistical Z-score analysis + machine learning models
+- **Multi-Location Monitoring** - Track multiple cities/locations simultaneously
+- **Real-time + Historical** - Bootstrap with 7 days history, then continuous 5-min updates
+- **Alarm Suggestions** - Auto-generated thresholds from anomaly patterns
+- **Location-based Filtering** - All data indexed and queryable by location
+- **Modern Stack** - Go backend, Typescript + React frontend, MySQL + Redis
 
 ## Project Structure
 
 ```
-.
-├── cmd/
-│   ├── weather_collector/
-│   │   └── main.go           # Background data collection service
-│   └── server/
-│       └── main.go           # HTTP API server
-├── internal/
-│   ├── api/
-│   │   └── open_meteo_client.go  # Open-Meteo API client (flexible field selection)
-│   ├── config/
-│   │   └── config.go         # YAML configuration management
-│   ├── database/
-│   │   └── db.go             # MySQL database layer
-│   ├── detector/
-│   │   ├── detector.go       # Anomaly detection algorithm
-│   │   └── suggester.go      # Alarm suggestion engine
-│   ├── ml/
-│   │   ├── train.py          # Machine learning model training
-│   │   └── infer.py          # ML model inference
-│   ├── models/
-│   │   └── models.go         # Data structures
-│   └── server/
-│       └── server.go         # HTTP request handlers
-├── config.yaml               # Application configuration file
-├── go.mod
-├── go.sum
-└── README.md
+cmd/
+  collect/    # Data ingestion from Open-Meteo API
+  store/      # Redis → MySQL persistence
+  detect/     # Anomaly detection + alarm suggestions
+  server/     # REST API server
+frontend/
+  src/        # React dashboard
+internal/
+  api/        # Open-Meteo client
+  config/     # YAML config loader
+  database/   # MySQL queries (location-aware)
+  detector/   # Statistical + ML anomaly detection
+  ml/         # Python ML models (train.py, infer.py)
+  models/     # Data structures
+  server/     # HTTP handlers
 ```
 
 ## Configuration
 
-The application uses a YAML configuration file (`config.yaml`) to manage monitored weather fields:
+Edit `config.yaml` to configure weather fields, Redis connection, and monitored locations:
 
 ```yaml
 weather:
-  monitored_fields:
-    - temperature_2m
-    - relative_humidity_2m
-    - precipitation
-    - wind_speed_10m
-    - dew_point_2m
+  monitored_fields: [temperature_2m, relative_humidity_2m, precipitation, wind_speed_10m, dew_point_2m]
+
+redis:
+  addr: "localhost:6379"
+  stream: "weather_metrics"
+
+locations:
+  - name: "San Francisco"
+    latitude: 37.7749
+    longitude: -122.4194
+  - name: "New York"
+    latitude: 40.7128
+    longitude: -74.0060
+  # Add more as needed
 ```
 
-These fields are used by:
-- Weather collector to determine what data to fetch and store
-- API server health endpoint to report what fields are being monitored
-- Database operations for storing and querying metrics
+## Quick Start
 
-## Requirements
+### Requirements
+- Go 1.19+, MySQL 8.0+, Redis 6.0+, Node.js 18+
 
-- Go 1.19+
-- MySQL v1.6.0
+### Setup
 
-## Installation
-
-1. Clone the repository
-
-2. Install dependencies:
 ```bash
-go mod download
-go mod tidy
-```
+# 1. Install and start Redis
+brew install redis
+brew services start redis or redis-server
+redis-cli ping  # Should return PONG
 
-3. Set up MySQL database:
-```bash
-# Start MySQL (if not running)
+# 2. Setup MySQL
 mysql.server start
-
-# Create database and tables
 mysql -u root -p
+use preempt; #switch to app DB
+
+# 3. Install dependencies
+go mod download
+cd frontend && npm install && cd ..
+
+# 4. Build services
+make build
+
+# 5. Configure
+# Edit config.yaml with your locations and settings
 ```
 
-**Default database credentials:**
-- Username: `myapp`
-- Password: `mypassword123`
-- Database: `weather_db`
+### Run
 
-4. Configure monitored fields in `config.yaml`:
-```yaml
-weather:
-  monitored_fields:
-    - temperature_2m
-    - relative_humidity_2m
-    - precipitation
-    - wind_speed_10m
-    - dew_point_2m
-```
-
-5. Build both services:
-```bash
-# Build weather collector
-go build -o weather_collector ./cmd/weather_collector
-
-# Build API server
-go build -o api_server ./cmd/server
-```
-
-## Usage
-
-### Running the Weather Collector
-
-The weather collector is a background service that continuously collects weather data:
+Start each service in a separate terminal:
 
 ```bash
-go run ./cmd/weather_collector
-# or
-./weather_collector
+./collect   # Terminal 1
+./store     # Terminal 2  
+./detect    # Terminal 3
+./server    # Terminal 4
+cd frontend && npm run dev  # Terminal 5
+redis-server # Terminal 6
 ```
 
-**What it does:**
-1. **Bootstrap Phase**: Loads past 7 days of hourly historical data using Open-Meteo Archive API
-2. **Monitoring Phase**: Fetches current weather every 5 minutes using Open-Meteo Forecast API
-3. **Detection**: Runs anomaly detection on all collected metrics
-4. **Suggestions**: Generates alarm threshold suggestions based on detected anomalies
+Access UI at `http://localhost:5173`
 
-**Expected output:**
-```
-2025/12/08 10:00:00 Starting weather data collector...
-2025/12/08 10:00:00 Configuration loaded successfully
-2025/12/08 10:00:00 Monitored fields: [temperature_2m relative_humidity_2m precipitation wind_speed_10m dew_point_2m]
-2025/12/08 10:00:05 Bootstrap: Fetched 168 hours of historical data
-2025/12/08 10:00:05 Bootstrap complete. Starting real-time monitoring...
-2025/12/08 10:00:05 Monitoring goroutine started (fetch interval: 5 minutes)
-```
+## API Reference
 
-### Running the API Server
+All data endpoints require `location` query parameter.
 
-The API server provides HTTP endpoints for querying weather data:
+**GET /locations** - List available locations from config
 
-```bash
-go run ./cmd/server/main.go
-# or
-./api_server
-```
+**GET /health** - Server health check
 
-The server will start on `http://localhost:8080`.
-
-**Expected output:**
-```
-2025/12/08 10:05:00 Server starting on :8080
-```
-
-### API Endpoints
-
-#### Health Check
-```bash
-GET /health
-```
-
-Returns server status and list of monitored weather fields from configuration.
-
-**Response:**
+**POST /fetch-current-weather?location={name}** - Manually trigger weather fetch
 ```json
-{
-    "status": "healthy",
-    "time": "2025-12-14 07:10:55.354398 +0000 UTC"
-}
+Body: {"latitude": 37.7749, "longitude": -122.4194}
 ```
 
-#### Fetch Current Weather (Manual)
-```bash
-POST /fetch-current-weather
-Content-Type: application/json
+**GET /metrics?location={name}&type={metric}&hours={n}** - Query metrics
+- `type`: optional, specific metric type
+- `hours`: optional, default 24
 
-{
-  "latitude": 37.7749,
-  "longitude": -122.4194
-}
-```
+**GET /anomalies?location={name}&limit={n}** - Get detected anomalies
+- `limit`: optional, default 100
 
-Manually triggers a fetch of current weather data from Open-Meteo API for specified coordinates.
+**GET /alarm-suggestions?location={name}&limit={n}** - Get alarm suggestions
+- `limit`: optional, default 50
 
-**Response:**
-```json
-{
-    "anomalies": 0,
-    "forecast": {
-        "time": "2025-12-13T23:00",
-        "interval": 900,
-        "temperature_2m": 47.3,
-        "relative_humidity_2m": 96,
-        "precipitation": 0,
-        "weather_code": 0,
-        "wind_speed_10m": 7.2,
-        "dew_point_2m": 46.2
-    },
-    "status": "success",
-    "timestamp": "2025-12-13T23:11:12.073126-08:00"
-}
-```
+## Anomaly Detection
 
-#### Get Metrics
-```bash
-GET /metrics?type=temperature_2m&hours=24
-```
+The system uses a **hybrid approach** combining two methods:
 
-Query parameters:
-- `type` (required): Metric type (`temperature_2m`, `relative_humidity_2m`, `precipitation`, `wind_speed_10m`)
-- `hours` (optional, default: 24): Look back period in hours
+### 1. Statistical Analysis (Z-score)
+- Calculates mean and standard deviation from 7 days of historical data
+- Flags values > 2 standard deviations from mean
+- Fast, interpretable, works well for Gaussian distributions
 
-**Response:**
-```json
-{
-  "metric_type": "temperature_2m",
-  "count": 96,
-  "metrics": [
-    {
-      "id": 1,
-      "timestamp": "2025-12-08T10:00:00Z",
-      "metric_type": "temperature_2m",
-      "value": 15.2
-    }
-  ]
-}
-```
+### 2. Machine Learning (Isolation Forest)
+- Trains unsupervised model on historical patterns per metric type
+- Detects complex, non-linear anomalies
+- Assigns anomaly scores and severity levels
+- Models stored in `internal/ml/` and retrained periodically
 
-#### Get Anomalies
-```bash
-GET /anomalies?limit=100
-```
+**Heuristic Rules** (applied to both):
+- Temperature: < -40°C or > 60°C
+- Humidity: 0% or 100%
+- Precipitation: negative values
+- Wind Speed: > 200 km/h
 
-Query parameters:
-- `limit` (optional, default: 100): Maximum number of anomalies to return
-
-**Response:**
-```json
-{
-  "count": 5,
-  "anomalies": [
-    {
-      "id": 1,
-      "timestamp": "2025-12-08T09:00:00Z",
-      "metric_type": "wind_speed_10m",
-      "value": 205.0,
-      "z_score": 3.2,
-      "severity": "high"
-    }
-  ]
-}
-```
-
-#### Get Alarm Suggestions
-```bash
-GET /alarm-suggestions?limit=50
-```
-
-Query parameters:
-- `limit` (optional, default: 50): Maximum number of suggestions to return
-
-**Response:**
-```json
-{
-  "count": 2,
-  "suggestions": [
-    {
-      "id": 1,
-      "metric_type": "temperature_2m",
-      "threshold": 45.5,
-      "operator": ">",
-      "suggested_at": "2025-12-08T10:00:00Z",
-      "confidence": 0.89,
-      "description": "Temperature exceeding safe operational limits",
-      "anomaly_count": 3
-    }
-  ]
-}
-```
-
-## How It Works
-
-### 1. Data Collection
-The application periodically fetches data from the Open-Meteo API for San Francisco and stores:
-- Temperature (2m height)
-- Relative humidity
-- Precipitation
-- Wind speed
-
-### 2. Anomaly Detection
-The detector uses Z-score analysis combined with heuristic rules:
-- **Temperature**: Flags values < -40°C or > 60°C
-- **Humidity**: Flags 0% or 100% (invalid readings)
-- **Precipitation**: Flags negative values
-- **Wind Speed**: Flags > 200 km/h
-
-Severity is classified as:
-- **High**: Extreme values
-- **Medium**: Significant deviations
-- **Low**: Minor deviations
-
-### 3. Alarm Suggestions
-After detecting 3+ anomalies of the same type, the engine:
-- Calculates mean and standard deviation
-- Proposes a threshold (typically mean ± 2×stddev)
-- Assigns a confidence score based on pattern consistency
-- Generates a human-readable description
+Both methods run every 10 minutes, and results are combined. After detecting 3+ anomalies of the same type, the system generates alarm threshold suggestions with confidence scores.
 
 ## Database Schema
 
-### metrics table
-```sql
-CREATE TABLE metrics (
-  id INTEGER PRIMARY KEY,
-  timestamp DATETIME NOT NULL,
-  metric_type TEXT NOT NULL,
-  value REAL NOT NULL
-);
+Tables with location-based indexing:
+
+**metrics**: `id, timestamp, location, metric_type, value`  
+**anomalies**: `id, timestamp, location, metric_type, value, z_score, severity`  
+**alarm_suggestions**: `id, location, metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count`
+
+Indexes on `(location, timestamp)` and `(location, metric_type)` for efficient queries.
+
+## Utilities
+
+**Makefile:**
+```bash
+make build   # Build all services
+make clean   # Remove binaries
+make test    # Run tests
 ```
 
-### anomalies table
-```sql
-CREATE TABLE anomalies (
-  id INTEGER PRIMARY KEY,
-  timestamp DATETIME NOT NULL,
-  metric_type TEXT NOT NULL,
-  value REAL NOT NULL,
-  z_score REAL NOT NULL,
-  severity TEXT NOT NULL
-);
+**Redis Monitoring:**
+```bash
+redis-cli XLEN weather_metrics              # Stream length
+redis-cli XREVRANGE weather_metrics + - COUNT 10  # Recent messages
+redis-cli XINFO GROUPS weather_metrics      # Consumer groups
 ```
 
-### alarm_suggestions table
-```sql
-CREATE TABLE alarm_suggestions (
-  id INTEGER PRIMARY KEY,
-  metric_type TEXT NOT NULL,
-  threshold REAL NOT NULL,
-  operator TEXT NOT NULL,
-  suggested_at DATETIME NOT NULL,
-  confidence REAL NOT NULL,
-  description TEXT NOT NULL,
-  anomaly_count INTEGER NOT NULL
-);
-```
-
-## Configuration
-
-Currently, the application is configured for San Francisco. To monitor a different location, modify the coordinates in `cmd/server/main.go`:
-
-```go
-forecast, err := client.GetForecast(37.7749, -122.4194) // latitude, longitude
-```
+**Database:** Default credentials - `myapp:mypassword123@weather_db`
 
 ## Future Enhancements
 
-- Machine learning for improved anomaly detection
-- Multi-location support
-- Add support for other API metrics (will need kafka to scale)
-- Frontend for visualization
+- WebSocket support for real-time frontend updates
+- Enhanced ML models with LSTM/Prophet for time-series forecasting
+- Multi-metric correlation analysis
+- Alert notification system (email, SMS, webhooks)
+- Custom detection rules per location/metric
+- Authentication and multi-user support

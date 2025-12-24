@@ -44,13 +44,13 @@ func NewAnomalyDetector() *AnomalyDetector {
 }
 
 // DetectAnomalies detects anomalies by querying historical metrics from the database and using z score and ML model
-func (ad *AnomalyDetector) DetectAnomalies(db *database.DB) ([]models.Anomaly, error) {
+func (ad *AnomalyDetector) DetectAnomalies(db *database.DB, location string) ([]models.Anomaly, error) {
 
-	stats_anomalies, err := ad.getStatsAnomalies(db)
+	stats_anomalies, err := ad.getStatsAnomalies(db, location)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anomalies via stats method %s", err)
 	}
-	ml_anomalies, err := ad.getMLAnomalies(db)
+	ml_anomalies, err := ad.getMLAnomalies(db, location)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anomalies via machine learning model method %s", err)
 	}
@@ -61,7 +61,7 @@ func (ad *AnomalyDetector) DetectAnomalies(db *database.DB) ([]models.Anomaly, e
 	return anomalies, nil
 }
 
-func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly, error) {
+func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB, location string) ([]models.Anomaly, error) {
 	var anomalies []models.Anomaly
 	now := time.Now()
 
@@ -70,7 +70,7 @@ func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly,
 
 	// Get historical data for the last 7 days
 	since := now.AddDate(0, 0, -7)
-	metrics, err := db.GetMetrics(metricTypes, since)
+	metrics, err := db.GetMetrics(location, metricTypes, since)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metrics %w", err)
 	}
@@ -83,7 +83,7 @@ func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly,
 
 	// Get recent metrics (last 24 hours) - single query
 	recentSince := now.Add(-24 * time.Hour)
-	recentMetrics, err := db.GetMetrics(metricTypes, recentSince)
+	recentMetrics, err := db.GetMetrics(location, metricTypes, recentSince)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get recent metrics: %w", err)
 	}
@@ -130,6 +130,7 @@ func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly,
 			if IsOutlier(zScore) {
 				severity := calculateSeverityFromZScore(zScore)
 				anomalies = append(anomalies, models.Anomaly{
+					Location:   location,
 					Timestamp:  m.Timestamp,
 					MetricType: metricType,
 					Value:      m.Value,
@@ -146,7 +147,7 @@ func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB) ([]models.Anomaly,
 	return anomalies, nil
 }
 
-func (ad *AnomalyDetector) getMLAnomalies(db *database.DB) ([]models.Anomaly, error) {
+func (ad *AnomalyDetector) getMLAnomalies(db *database.DB, location string) ([]models.Anomaly, error) {
 	var anomalies []models.Anomaly
 	// Export data to a temporary CSV file for Python to read
 	tempFile, err := os.Create("metrics.csv")
@@ -165,7 +166,7 @@ func (ad *AnomalyDetector) getMLAnomalies(db *database.DB) ([]models.Anomaly, er
 	// Get all metrics from the last 30 days
 	metricTypes := ad.cfg.Weather.MonitoredFields
 	since := time.Now().AddDate(0, 0, -30)
-	metrics, err := db.GetMetrics(metricTypes, since) // Get all metric types
+	metrics, err := db.GetMetrics(location, metricTypes, since) // Get all metric types
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metrics: %w", err)
 	}
@@ -212,6 +213,7 @@ func (ad *AnomalyDetector) getMLAnomalies(db *database.DB) ([]models.Anomaly, er
 		}
 
 		anomaly := models.Anomaly{
+			Location:   location,
 			Timestamp:  timestamp,
 			MetricType: mlAnomaly.MetricType,
 			Value:      mlAnomaly.Value,

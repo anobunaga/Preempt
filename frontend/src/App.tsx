@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './App.css';
-import type { HealthResponse, FetchResponse, MetricsResponse, AnomaliesResponse, AlarmSuggestionsResponse, FetchRequest } from './types';
+import type { HealthResponse, FetchResponse, MetricsResponse, AnomaliesResponse, AlarmSuggestionsResponse, FetchRequest, LocationsResponse, Location } from './types';
 
 const API_BASE = '/api';
 
@@ -10,11 +10,39 @@ function App() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
   const [suggestions, setSuggestions] = useState<AlarmSuggestionsResponse | null>(null);
-  const [lat, setLat] = useState(37.7749);
-  const [lon, setLon] = useState(-122.4194);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [metricType, setMetricType] = useState('temperature_2m');
   const [hours, setHours] = useState(24);
-   const [closestCity, setClosestCity] = useState<string>('');
+
+  // Fetch locations on component mount
+  useEffect(() => {
+    fetchLocations();
+  }, []);
+
+  const fetchLocations = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/locations`);
+      const data: LocationsResponse = await res.json();
+      console.log('Locations response:', data);
+      console.log('Locations array:', data.locations);
+      setLocations(data.locations);
+      // Set first location as default if available
+      if (data.locations.length > 0) {
+        setSelectedLocation(data.locations[0]);
+        console.log('Selected first location:', data.locations[0]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch locations:', err);
+    }
+  };
+
+  const getLocationString = (location: Location | null): string => {
+    if (!location || !location.Name) {
+      return 'Unknown';
+    }
+    return location.Name;
+  };
 
   const fetchHealth = async () => {
     try {
@@ -26,29 +54,28 @@ function App() {
     }
   };
 
-  const fetchClosestCity = async (latitude: number, longitude: number) => {
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`);
-      const data = await res.json();
-      // Extract city from the response (prioritize city, then town, etc.)
-      const city = data.address?.city || data.address?.town || data.address?.village || 'Unknown location';
-      setClosestCity(city);
-    } catch (err) {
-      console.error('Geocoding error:', err);
-      setClosestCity('Unable to determine city');
-    }
-  };
-
   const fetchCurrentWeather = async () => {
+    if (!selectedLocation) {
+      alert('Please select a location first');
+      return;
+    }
     try {
-      await fetchClosestCity(lat, lon);
-
-      const req: FetchRequest = { latitude: lat, longitude: lon };
-      const res = await fetch(`${API_BASE}/fetch-current-weather`, {
+      const req: FetchRequest = { 
+        latitude: selectedLocation.Latitude, 
+        longitude: selectedLocation.Longitude 
+      };
+      const locationStr = getLocationString(selectedLocation);
+      const res = await fetch(`${API_BASE}/fetch-current-weather?location=${encodeURIComponent(locationStr)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req),
       });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Server error:', errorText);
+        alert(`Error: ${errorText}`);
+        return;
+      }
       const data: FetchResponse = await res.json();
       setCurrentWeather(data);
     } catch (err) {
@@ -57,8 +84,13 @@ function App() {
   };
 
   const fetchMetrics = async () => {
+    if (!selectedLocation) {
+      alert('Please select a location first');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/metrics?type=${metricType}&hours=${hours}`);
+      const locationStr = getLocationString(selectedLocation);
+      const res = await fetch(`${API_BASE}/metrics?location=${locationStr}&type=${metricType}&hours=${hours}`);
       const data: MetricsResponse = await res.json();
       setMetrics(data);
     } catch (err) {
@@ -67,8 +99,13 @@ function App() {
   };
 
   const fetchAnomalies = async () => {
+    if (!selectedLocation) {
+      alert('Please select a location first');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/anomalies?limit=100`);
+      const locationStr = getLocationString(selectedLocation);
+      const res = await fetch(`${API_BASE}/anomalies?location=${locationStr}&limit=20`);
       const data: AnomaliesResponse = await res.json();
       setAnomalies(data);
     } catch (err) {
@@ -77,8 +114,13 @@ function App() {
   };
 
   const fetchSuggestions = async () => {
+    if (!selectedLocation) {
+      alert('Please select a location first');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/alarm-suggestions?limit=50`);
+      const locationStr = getLocationString(selectedLocation);
+      const res = await fetch(`${API_BASE}/alarm-suggestions?location=${locationStr}&limit=15`);
       const data: AlarmSuggestionsResponse = await res.json();
       setSuggestions(data);
     } catch (err) {
@@ -91,6 +133,29 @@ function App() {
       <h1>Preempt</h1>
       
       <section>
+        <h2>Location Selection</h2>
+        {locations.length > 0 ? (
+          <>
+            <select 
+              value={selectedLocation ? locations.indexOf(selectedLocation) : 0} 
+              onChange={e => setSelectedLocation(locations[parseInt(e.target.value)])}
+            >
+              {locations.map((loc, idx) => (
+                <option key={idx} value={idx}>
+                  {loc?.Name || 'Unknown'}
+                </option>
+              ))}
+            </select>
+            {selectedLocation && (
+              <p><strong>Selected:</strong> {selectedLocation.Name}</p>
+            )}
+          </>
+        ) : (
+          <p>Loading locations...</p>
+        )}
+      </section>
+
+      <section>
         <h2>Health Check</h2>
         <button onClick={fetchHealth}>Check Health</button>
         {health && <pre>{JSON.stringify(health, null, 2)}</pre>}
@@ -98,10 +163,7 @@ function App() {
 
       <section>
         <h2>Fetch Current Weather</h2>
-        <input type="number" value={lat} onChange={e => setLat(parseFloat(e.target.value))} placeholder="Latitude" />
-        <input type="number" value={lon} onChange={e => setLon(parseFloat(e.target.value))} placeholder="Longitude" />
-        <button onClick={fetchCurrentWeather}>Fetch</button>
-        {closestCity && <p><strong>Closest City:</strong> {closestCity}</p>}
+        <button onClick={fetchCurrentWeather} disabled={!selectedLocation}>Fetch Weather</button>
         {currentWeather && <pre>{JSON.stringify(currentWeather, null, 2)}</pre>}
       </section>
 
@@ -114,19 +176,19 @@ function App() {
           <option value="wind_speed_10m">Wind Speed</option>
         </select>
         <input type="number" value={hours} onChange={e => setHours(parseInt(e.target.value))} placeholder="Hours" />
-        <button onClick={fetchMetrics}>Fetch Metrics</button>
+        <button onClick={fetchMetrics} disabled={!selectedLocation}>Fetch Metrics</button>
         {metrics && <pre>{JSON.stringify(metrics, null, 2)}</pre>}
       </section>
 
       <section>
         <h2>Anomalies</h2>
-        <button onClick={fetchAnomalies}>Fetch Anomalies</button>
+        <button onClick={fetchAnomalies} disabled={!selectedLocation}>Fetch Anomalies</button>
         {anomalies && <pre>{JSON.stringify(anomalies, null, 2)}</pre>}
       </section>
 
       <section>
         <h2>Alarm Suggestions</h2>
-        <button onClick={fetchSuggestions}>Fetch Suggestions</button>
+        <button onClick={fetchSuggestions} disabled={!selectedLocation}>Fetch Suggestions</button>
         {suggestions && <pre>{JSON.stringify(suggestions, null, 2)}</pre>}
       </section>
     </div>

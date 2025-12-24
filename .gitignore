@@ -4,7 +4,6 @@
 .DS_Store
 bin/
 dist/
-preempt
 .idea/
 .vscode/
 *.swp
@@ -12,13 +11,18 @@ preempt
 *~
 .env
 .env.local
-preempt
 /vendor
-server
+dump.rdb
+
+# Ignore binaries in root directory
+/collect
+/store
+/detect
+/server
+
+# Ignore ML model files
 model_dew_point_2m.pkl
 model_precipitation.pkl
 model_relative_humidity_2m.pkl
 model_wind_speed_10m.pkl
 model_temperature_2m.pkl
-weather_collector
-api_server
