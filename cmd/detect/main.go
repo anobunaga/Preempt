@@ -61,7 +61,7 @@ func runDetectionForAllLocations(db *database.DB, cfg *config.Config, anomalyDet
 	totalAnomalies := 0
 	totalSuggestions := 0
 
-	for _, location := range cfg.Locations {
+	for _, location := range cfg.Weather.Locations {
 		log.Printf("Detecting anomalies for %s", location.Name)
 
 		// Detect anomalies for this location

@@ -22,7 +22,8 @@ var (
 // Config - can/will add more later
 type Config struct {
 	Weather struct {
-		MonitoredFields []string `yaml:"monitored_fields"`
+		MonitoredFields []string   `yaml:"monitored_fields"`
+		Locations       []Location `yaml:"locations"`
 	} `yaml:"weather"`
 	Redis struct {
 		Addr     string `yaml:"addr"`
@@ -30,7 +31,6 @@ type Config struct {
 		DB       int    `yaml:"db"`
 		Stream   string `yaml:"stream"`
 	} `yaml:"redis"`
-	Locations []Location `yaml:"locations"`
 }
 
 func Load(configPath string) (*Config, error) {

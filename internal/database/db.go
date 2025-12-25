@@ -361,3 +361,28 @@ func (db *DB) GetMetricStats(location string, metricType string, since time.Time
 	err = row.Scan(&count, &mean, &stdDev)
 	return
 }
+
+// GetLocationsWithData returns a set of all locations that have data in the database
+func (db *DB) GetLocationsWithData() (map[string]bool, error) {
+	query := `SELECT DISTINCT location FROM metrics`
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get locations with data: %w", err)
+	}
+	defer rows.Close()
+
+	locations := make(map[string]bool)
+	for rows.Next() {
+		var location string
+		if err := rows.Scan(&location); err != nil {
+			return nil, fmt.Errorf("failed to scan location: %w", err)
+		}
+		locations[location] = true
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating locations: %w", err)
+	}
+
+	return locations, nil
+}
