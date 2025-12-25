@@ -29,7 +29,7 @@ func main() {
 	defer redisClient.Close()
 
 	// Initialize database
-	db, err := database.NewDB("myapp:mypassword123@tcp(localhost:3306)/preempt?parseTime=true") // Adjust DSN as needed
+	db, err := database.NewDB(config.GetDatabaseDSN())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -41,7 +41,7 @@ func main() {
 	stream := cfg.Redis.Stream
 
 	// Create consumer group if it doesn't exist
-	err = redisClient.XGroupCreate(context.Background(), stream, consumerGroup, "0").Err()
+	err = redisClient.XGroupCreateMkStream(context.Background(), stream, consumerGroup, "0").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		log.Fatalf("Failed to create consumer group: %v", err)
 	}
