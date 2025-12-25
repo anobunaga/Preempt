@@ -80,7 +80,7 @@ locations:
 ## Quick Start
 
 ### Requirements
-- Go 1.19+, MySQL 8.0+, Redis 6.0+, Node.js 18+
+- Go 1.19+, MySQL 8.0+, Redis 6.0+, Node.js 18+, Python 3.8+
 
 ### Setup
 
@@ -95,14 +95,19 @@ mysql.server start
 mysql -u root -p
 use preempt; #switch to app DB
 
-# 3. Install dependencies
+# 3. Install Go dependencies
 go mod download
+
+# 4. Install Python dependencies (for ML anomaly detection)
+pip3 install -r requirements.txt
+
+# 5. Install frontend dependencies
 cd frontend && npm install && cd ..
 
-# 4. Build services
+# 6. Build services
 make build
 
-# 5. Configure
+# 7. Configure
 # Edit config.yaml with your locations and settings
 ```
 
@@ -113,11 +118,13 @@ Start each service in a separate terminal:
 ```bash
 ./collect   # Terminal 1
 ./store     # Terminal 2  
-./detect    # Terminal 3
+./detect    # Terminal 3 (automatically starts Python ML worker)
 ./server    # Terminal 4
 cd frontend && npm run dev  # Terminal 5
 redis-server # Terminal 6
 ```
+
+**Note:** The `detect` service automatically starts the Python ML worker (`train.py`) as a child process and terminates it on shutdown.
 
 Access UI at `http://localhost:5173`
 
@@ -156,8 +163,24 @@ The system uses a **hybrid approach** combining two methods:
 ### 2. Machine Learning (Isolation Forest)
 - Trains unsupervised model on historical patterns per metric type
 - Detects complex, non-linear anomalies
+- Communicates via Redis streams (`ml_input` → `ml_output`)
+- Python ML worker runs automatically with detect service
 - Assigns anomaly scores and severity levels
-- Models stored in `internal/ml/` and retrained periodically
+- Models stored in `ml_models/` directory
+
+**Communication Flow:**
+```
+Detect Service (Go) → Publishes metrics to ml_input stream
+                              ↓
+                    Python ML Worker (train.py)
+                    - Listens on ml_input
+                    - Trains Isolation Forest per metric
+                    - Detects anomalies
+                              ↓
+                    Publishes results to ml_output stream
+                              ↓
+                    Detect Service reads and stores results
+```
 
 **Heuristic Rules** (applied to both):
 - Temperature: < -40°C or > 60°C
