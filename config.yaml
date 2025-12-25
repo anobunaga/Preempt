@@ -5,57 +5,55 @@ weather:
     - precipitation
     - wind_speed_10m
     - dew_point_2m
+  locations:
+    - name: "San Francisco"
+      latitude: 37.7749
+      longitude: -122.4194
+    - name: "New York"
+      latitude: 40.7128
+      longitude: -74.0060
+    - name: "London"
+      latitude: 51.5074
+      longitude: -0.1278
+    - name: "Tokyo"
+      latitude: 35.6762
+      longitude: 139.6503
+    - name: "Sydney"
+      latitude: -33.8688
+      longitude: 151.2093
+    - name: "Paris"
+      latitude: 48.8566
+      longitude: 2.3522
+    - name: "Dubai"
+      latitude: 25.2048
+      longitude: 55.2708
+    - name: "Singapore"
+      latitude: 1.3521
+      longitude: 103.8198
+    - name: "Mumbai"
+      latitude: 19.0760
+      longitude: 72.8777
+    - name: "São Paulo"
+      latitude: -23.5505
+      longitude: -46.6333
+    - name: "Toronto"
+      latitude: 43.6532
+      longitude: -79.3832
+    - name: "Berlin"
+      latitude: 52.5200
+      longitude: 13.4050
+    - name: "Seoul"
+      latitude: 37.5665
+      longitude: 126.9780
+    - name: "Mexico City"
+      latitude: 19.4326
+      longitude: -99.1332
+    - name: "Cape Town"
+      latitude: -33.9249
+      longitude: 18.4241
 
 redis:
   addr: "localhost:6379"
   password: ""
   db: 0
   stream: "weather_metrics"
-
-locations:
-  - name: "San Francisco"
-    latitude: 37.7749
-    longitude: -122.4194
-  - name: "New York"
-    latitude: 40.7128
-    longitude: -74.0060
-  - name: "London"
-    latitude: 51.5074
-    longitude: -0.1278
-  - name: "Tokyo"
-    latitude: 35.6762
-    longitude: 139.6503
-  - name: "Sydney"
-    latitude: -33.8688
-    longitude: 151.2093
-  - name: "Paris"
-    latitude: 48.8566
-    longitude: 2.3522
-  - name: "Dubai"
-    latitude: 25.2048
-    longitude: 55.2708
-  - name: "Singapore"
-    latitude: 1.3521
-    longitude: 103.8198
-  - name: "Mumbai"
-    latitude: 19.0760
-    longitude: 72.8777
-  - name: "São Paulo"
-    latitude: -23.5505
-    longitude: -46.6333
-  - name: "Toronto"
-    latitude: 43.6532
-    longitude: -79.3832
-  - name: "Berlin"
-    latitude: 52.5200
-    longitude: 13.4050
-  - name: "Seoul"
-    latitude: 37.5665
-    longitude: 126.9780
-  - name: "Mexico City"
-    latitude: 19.4326
-    longitude: -99.1332
-  - name: "Cape Town"
-    latitude: -33.9249
-    longitude: 18.4241
-  

@@ -67,7 +67,7 @@ func (s *Server) handleLocations(w http.ResponseWriter, r *http.Request) {
 	config.Load("./config.yaml")
 	cfg := config.Get()
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"locations": cfg.Locations,
+		"locations": cfg.Weather.Locations,
 	})
 }
 

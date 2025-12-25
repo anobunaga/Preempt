@@ -4,20 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
-	"os/signal"
 	"preempt/internal/api"
 	"preempt/internal/config"
 	"preempt/internal/database"
-	"syscall"
-	"time"
+	"sync"
 
 	"github.com/go-redis/redis/v8"
 )
 
 const (
-	collectionInterval = 5 * time.Minute
-	historicalDays     = 7
+	historicalDays = 7
 )
 
 func main() {
@@ -40,50 +36,42 @@ func main() {
 
 	client := api.NewOpenMeteoClient()
 
-	// Iterate over all locations and fetch historical data in goroutines
-	for _, location := range cfg.Locations {
-		go func(loc config.Location) {
-			log.Printf("Fetching historical data for %s", loc.Name)
-			forecast, err := client.GetHistoricalHourlyData(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields, historicalDays)
-			if err != nil {
-				log.Printf("Failed to fetch historical forecast for %s: %v", loc.Name, err)
-				return
-			}
+	// Get all locations that already have data in the database
+	locationsWithData, err := db.GetLocationsWithData()
+	if err != nil {
+		log.Fatalf("Failed to get locations with data: %v", err)
+	}
 
-			sendToRedis(redisClient, forecast, loc, cfg.Weather.MonitoredFields, "historical")
+	var wg sync.WaitGroup
+
+	// Check each location and fetch historical data only for new locations
+	for _, location := range cfg.Weather.Locations {
+		wg.Add(1)
+		go func(loc config.Location) {
+			defer wg.Done()
+
+			if !locationsWithData[loc.Name] {
+				log.Printf("New location detected: %s - Fetching historical data", loc.Name)
+				forecast, err := client.GetHistoricalHourlyData(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields, historicalDays)
+				if err != nil {
+					log.Printf("Failed to fetch historical forecast for %s: %v", loc.Name, err)
+					return
+				}
+				sendToRedis(redisClient, forecast, loc, cfg.Weather.MonitoredFields, "historical")
+			} else {
+				log.Printf("Fetching current weather data for: %s", loc.Name)
+				weatherData, err := client.GetCurrentWeather(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields)
+				if err != nil {
+					log.Printf("Failed to fetch current weather data for %s: %v", loc.Name, err)
+					return
+				}
+				sendToRedis(redisClient, weatherData, loc, cfg.Weather.MonitoredFields, "current")
+			}
 		}(location)
 	}
 
-	// Start periodic data collection
-	go startDataCollection(client, redisClient, cfg)
-
-	log.Println("Collector running. Press Ctrl+C to stop...")
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	<-quit
-
-	log.Println("Shutting down collector...")
-}
-
-// startDataCollection periodically fetches data from the API (every 5 min)
-func startDataCollection(client *api.OpenMeteoClient, redisClient *redis.Client, cfg *config.Config) {
-	ticker := time.NewTicker(collectionInterval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		log.Println("Fetching current data from Open-Meteo API")
-
-		for _, location := range cfg.Locations {
-			forecast, err := client.GetCurrentWeather(location.Latitude, location.Longitude, cfg.Weather.MonitoredFields)
-			if err != nil {
-				log.Printf("Failed to fetch forecast for %s: %v", location.Name, err)
-				continue
-			}
-
-			sendToRedis(redisClient, forecast, location, cfg.Weather.MonitoredFields, "current")
-		}
-	}
+	wg.Wait()
+	log.Printf("Data collection completed. Exiting")
 }
 
 // sendToRedis serializes the forecast data and publishes it to a Redis stream
