@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: preempt-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: preempt
+      MYSQL_USER: myapp
+      MYSQL_PASSWORD: mypassword123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - preempt-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: preempt-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - preempt-network
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-api
+    command: ["/app/bin/server"]
+    ports:
+      - "8080:8080"
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=myapp
+      - DB_PASSWORD=mypassword123
+      - DB_NAME=preempt
+      - REDIS_ADDR=redis:6379
+      - REDIS_STREAM=weather_metrics
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+  # Scheduler (ofelia - cron for Docker)
+  scheduler:
+    image: mcuadros/ofelia:latest
+    container_name: preempt-scheduler
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - preempt-network
+
+  # Collector (runs every 5 minutes via ofelia)
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-collector
+    command: ["sh", "-c", "while true; do sleep 3600; done"]  # Keep container alive
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=myapp
+      - DB_PASSWORD=mypassword123
+      - DB_NAME=preempt
+      - REDIS_ADDR=redis:6379
+      - REDIS_STREAM=weather_metrics
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - preempt-network
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.collect-weather.schedule: "@every 5m"
+      ofelia.job-exec.collect-weather.command: "/app/bin/collect"
+
+  # Store Consumer (long-running)
+  store:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-store
+    command: ["/app/bin/store"]
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=myapp
+      - DB_PASSWORD=mypassword123
+      - DB_NAME=preempt
+      - REDIS_ADDR=redis:6379
+      - REDIS_STREAM=weather_metrics
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+  # Detector (runs periodically)
+  # TODO: make this a cronjob
+  detector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-detector
+    command: ["/app/bin/detect"]
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=myapp
+      - DB_PASSWORD=mypassword123
+      - DB_NAME=preempt
+      - REDIS_ADDR=redis:6379
+      - REDIS_STREAM=weather_metrics
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: preempt-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+networks:
+  preempt-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:

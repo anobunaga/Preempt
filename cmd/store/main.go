@@ -18,18 +18,18 @@ import (
 func main() {
 	// Load config
 	config.Load("./config.yaml")
-	cfg := config.Get()
 
-	// Initialize Redis client
+	// Initialize Redis client from environment variables
+	redisCfg := config.GetRedisConfig()
 	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
+		Addr:     redisCfg.Addr,
+		Password: redisCfg.Password,
+		DB:       redisCfg.DB,
 	})
 	defer redisClient.Close()
 
 	// Initialize database
-	db, err := database.NewDB("myapp:mypassword123@tcp(localhost:3306)/preempt?parseTime=true") // Adjust DSN as needed
+	db, err := database.NewDB(config.GetDatabaseDSN())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -38,10 +38,10 @@ func main() {
 	// Consumer group and name
 	consumerGroup := "weather_consumers"
 	consumerName := "consumer-1"
-	stream := cfg.Redis.Stream
+	stream := redisCfg.Stream
 
 	// Create consumer group if it doesn't exist
-	err = redisClient.XGroupCreate(context.Background(), stream, consumerGroup, "0").Err()
+	err = redisClient.XGroupCreateMkStream(context.Background(), stream, consumerGroup, "0").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		log.Fatalf("Failed to create consumer group: %v", err)
 	}

@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Get()
 
 	// Initialize database
-	db, err := database.NewDB("myapp:mypassword123@tcp(localhost:3306)/preempt?parseTime=true") // Adjust DSN
+	db, err := database.NewDB(config.GetDatabaseDSN())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}

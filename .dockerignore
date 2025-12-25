@@ -1,0 +1,28 @@
+# Binaries
+collect
+store
+detect
+server
+
+# Development files
+.git
+.gitignore
+.vscode
+*.md
+README.md
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Data files
+*.csv
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vendor (will be downloaded during build)
+vendor/
