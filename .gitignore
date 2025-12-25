@@ -21,8 +21,4 @@ dump.rdb
 /server
 
 # Ignore ML model files
-model_dew_point_2m.pkl
-model_precipitation.pkl
-model_relative_humidity_2m.pkl
-model_wind_speed_10m.pkl
-model_temperature_2m.pkl
+/ml_models
