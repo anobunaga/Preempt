@@ -40,6 +40,21 @@ func main() {
 	consumerName := "consumer-1"
 	stream := redisCfg.Stream
 
+	log.Printf("Connecting to Redis at %s", redisCfg.Addr)
+
+	// Test Redis connection with retry
+	maxRetries := 5
+	for i := 0; i < maxRetries; i++ {
+		ctx := context.Background()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			log.Printf("Redis connection attempt %d/%d failed: %v", i+1, maxRetries, err)
+			time.Sleep(time.Second * 2)
+			continue
+		}
+		log.Println("Successfully connected to Redis")
+		break
+	}
+
 	// Create consumer group if it doesn't exist
 	err = redisClient.XGroupCreateMkStream(context.Background(), stream, consumerGroup, "0").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
@@ -123,6 +138,9 @@ func main() {
 
 				// Acknowledge the message
 				redisClient.XAck(context.Background(), stream, consumerGroup, m.ID)
+
+				// Trim weather_metrics stream to prevent unbounded growth (keep last 1000 messages)
+				redisClient.XTrimMaxLen(context.Background(), stream, 1000).Err()
 			}
 		}
 	}
