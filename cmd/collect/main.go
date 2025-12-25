@@ -21,14 +21,15 @@ func main() {
 	cfg := config.Get()
 
 	// Initialize Redis client
+	redisCfg := config.GetRedisConfig()
 	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
+		Addr:     redisCfg.Addr,
+		Password: redisCfg.Password,
+		DB:       redisCfg.DB,
 	})
 	defer redisClient.Close()
 
-	db, err := database.NewDB("myapp:mypassword123@tcp(localhost:3306)/preempt?parseTime=true")
+	db, err := database.NewDB(config.GetDatabaseDSN())
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -89,7 +90,7 @@ func sendToRedis(redisClient *redis.Client, forecast interface{}, location confi
 	}
 
 	err = redisClient.XAdd(context.Background(), &redis.XAddArgs{
-		Stream: config.Get().Redis.Stream,
+		Stream: config.GetRedisConfig().Stream,
 		Values: map[string]interface{}{"data": string(data)},
 	}).Err()
 	if err != nil {

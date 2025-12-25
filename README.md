@@ -77,6 +77,38 @@ locations:
   # Add more as needed
 ```
 
+## Quick Start with Docker
+
+Run the entire application with one command:
+
+```bash
+docker-compose up
+```
+
+The application will:
+- Start MySQL and Redis
+- Initialize the database schema
+- Start the API server (port 8080)
+- Start the collector (runs every 5 minutes)
+- Start the store consumer (processes Redis stream)
+- Start the detector (runs every 10 minutes)
+- Start the React frontend (port 3000)
+
+**Access the application:**
+- Frontend: http://localhost:3000
+- API: http://localhost:8080
+
+**Stop everything:**
+```bash
+docker-compose down
+```
+
+**View logs:**
+```bash
+docker-compose logs -f
+```
+---
+
 ## Quick Start
 
 ### Requirements
