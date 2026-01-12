@@ -14,22 +14,21 @@ RUN go build -o /app/bin/store ./cmd/store
 RUN go build -o /app/bin/detect ./cmd/detect
 
 
-FROM alpine:latest
+FROM python:3.11-slim
 
-# Python
-RUN apk --no-cache add \
+# Install ca-certificates for HTTPS requests
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    tzdata \
-    python3 \
-    py3-pip \
-    py3-numpy \
-    py3-pandas \
-    py3-scikit-learn
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=builder /app/bin /app/bin
 COPY config.yaml /app/config.yaml
 COPY internal/ml/ /app/internal/ml/
+COPY requirements.txt /app/requirements.txt
+
+# Install Python dependencies (will use pre-built wheels)
+RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["/app/bin/server"]

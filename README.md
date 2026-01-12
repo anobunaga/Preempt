@@ -10,30 +10,56 @@ Preempt is a distributed weather monitoring system with a **microservices archit
 1. **Collect** - Fetches weather data (7 days historical on startup, then every 5 minutes) and publishes to Redis
 2. **Store** - Consumes Redis stream and persists to MySQL
 3. **Detect** - Runs anomaly detection every 10 minutes using hybrid statistical + ML approach, generates alarm suggestions
-4. **Server** - REST API for querying metrics, anomalies, and suggestions
+4. **ML Trainer** - Python service that trains models and detects anomalies, communicates via Redis streams
+5. **Server** - REST API for querying metrics, anomalies, and suggestions
 
 **Frontend:**
 - React dashboard with location selection, metric visualization, and anomaly display
 
 **Data Pipeline:**
-Replace with visual diagram later
 ```
-Open-Meteo API → Collect → Redis Stream → Store → MySQL
-                                            ↓
-                                         Detect → Anomalies/Suggestions
-                                                       ↓
-                                          Frontend ← Server ← MySQL
+Open-Meteo API
+      ↓
+  Collect (every 5 min)
+      ↓
+Redis Stream (weather_metrics)
+      ↓
+   Store (continuous)
+      ↓
+    MySQL
+      ↓
+  Detect (every 5 min)
+      ↓
+      ├─────────────────┐
+      │                 │
+Statistical          Redis Stream (ml_input)
+Z-Score                 ↓
+Analysis          ML Trainer (Python, continuous)
+      │                 ↓
+      │           Redis Stream (ml_output)
+      │                 │
+      └─────────────────┘
+              ↓
+    Combine & Store Anomalies
+              ↓
+           MySQL
+              ↓
+      Server (REST API)
+              ↓
+          Frontend
 ```
 
 ## Features
 
 - **Microservices Architecture** - Decoupled services via Redis streams
+- **Containerized Deployment** - Docker Compose orchestration with auto-restart and health checks
 - **Hybrid Anomaly Detection** - Statistical Z-score analysis + machine learning models
+- **Independent ML Service** - Python ML trainer runs as separate container, communicates via Redis
 - **Multi-Location Monitoring** - Track multiple cities/locations simultaneously
 - **Real-time + Historical** - Bootstrap with 7 days history, then continuous 5-min updates
 - **Alarm Suggestions** - Auto-generated thresholds from anomaly patterns
 - **Location-based Filtering** - All data indexed and queryable by location
-- **Modern Stack** - Go backend, Typescript + React frontend, MySQL + Redis
+- **Modern Stack** - Go backend, Python ML, TypeScript + React frontend, MySQL + Redis
 
 ## Project Structure
 
@@ -49,8 +75,8 @@ internal/
   api/        # Open-Meteo client
   config/     # YAML config loader
   database/   # MySQL queries (location-aware)
-  detector/   # Statistical + ML anomaly detection
-  ml/         # Python ML models (train.py, infer.py)
+  detector/   # Statistical + ML anomaly detection orchestration
+  ml/         # Python ML service (train.py - runs as Docker container)
   models/     # Data structures
   server/     # HTTP handlers
 ```
@@ -77,7 +103,9 @@ locations:
   # Add more as needed
 ```
 
-## Quick Start with Docker
+Redis and database configurations are set via environment variables in `docker-compose.yml`.
+
+## Quick Start with Docker (Recommended)
 
 Run the entire application with one command:
 
@@ -86,33 +114,50 @@ docker-compose up
 ```
 
 The application will:
-- Start MySQL and Redis
-- Initialize the database schema
+- Start MySQL and Redis with health checks
+- Initialize the database schema via `init.sql`
 - Start the API server (port 8080)
-- Start the collector (runs every 5 minutes)
-- Start the store consumer (processes Redis stream)
-- Start the detector (runs every 10 minutes)
+- Start the collector (runs on startup + every 5 minutes via ofelia scheduler)
+- Start the store consumer (processes Redis stream continuously)
+- Start the ML trainer (Python service, processes ML jobs continuously)
+- Start the detector (runs on startup + every 10 minutes via ofelia scheduler)
 - Start the React frontend (port 3000)
 
 **Access the application:**
 - Frontend: http://localhost:3000
 - API: http://localhost:8080
 
-**Stop everything:**
-```bash
-docker-compose down
-```
-
 **View logs:**
 ```bash
-docker-compose logs -f
+# All services
+docker compose logs -f
+
+# Specific services
+docker compose logs -f ml-trainer detector
+```
+
+**Stop everything:**
+```bash
+docker compose down
+```
+
+**Reset database and volumes:**
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+**Rebuild after code changes:**
+```bash
+docker compose build --no-cache
+docker compose up -d
 ```
 ---
 
-## Quick Start
+## Manual Setup (Development)
 
 ### Requirements
-- Go 1.19+, MySQL 8.0+, Redis 6.0+, Node.js 18+
+- Go 1.21+, MySQL 8.0+, Redis 6.0+, Node.js 18+, Python 3.11+
 
 ### Setup
 
@@ -127,14 +172,19 @@ mysql.server start
 mysql -u root -p
 use preempt; #switch to app DB
 
-# 3. Install dependencies
+# 3. Install Go dependencies
 go mod download
+
+# 4. Install Python dependencies (for ML anomaly detection)
+pip3 install -r requirements.txt
+
+# 5. Install frontend dependencies
 cd frontend && npm install && cd ..
 
-# 4. Build services
+# 6. Build services
 make build
 
-# 5. Configure
+# 7. Configure
 # Edit config.yaml with your locations and settings
 ```
 
@@ -145,11 +195,13 @@ Start each service in a separate terminal:
 ```bash
 ./collect   # Terminal 1
 ./store     # Terminal 2  
-./detect    # Terminal 3
+./detect    # Terminal 3 (automatically starts Python ML worker)
 ./server    # Terminal 4
 cd frontend && npm run dev  # Terminal 5
 redis-server # Terminal 6
 ```
+
+**Note:** For development, you'll need to manually run `collect` and `detect` periodically, or use Docker Compose which handles scheduling automatically.
 
 Access UI at `http://localhost:5173`
 
@@ -188,8 +240,30 @@ The system uses a **hybrid approach** combining two methods:
 ### 2. Machine Learning (Isolation Forest)
 - Trains unsupervised model on historical patterns per metric type
 - Detects complex, non-linear anomalies
+- Communicates via Redis streams (`ml_input` → `ml_output`)
+- Python ML trainer runs as independent Docker container
 - Assigns anomaly scores and severity levels
-- Models stored in `internal/ml/` and retrained periodically
+- Models persisted in Docker volume `ml_models/`
+
+**Communication Flow:**
+```
+Detect Service (Go)
+    ↓
+1. Fetches metrics from MySQL
+2. Publishes to Redis stream: ml_input (with job_id)
+    ↓
+ML Trainer Container (Python - train.py)
+    ↓
+3. Consumes from ml_input stream (consumer group)
+4. Trains Isolation Forest per metric type
+5. Detects anomalies with scores
+6. Publishes to Redis stream: ml_output (with job_id)
+    ↓
+Detect Service (Go)
+    ↓
+7. Polls ml_output stream (matches job_id)
+8. Stores anomalies to MySQL
+```
 
 **Heuristic Rules** (applied to both):
 - Temperature: < -40°C or > 60°C

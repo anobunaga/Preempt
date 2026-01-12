@@ -89,7 +89,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: preempt-collector
-    command: ["sh", "-c", "while true; do sleep 3600; done"]  # Keep container alive
+    command: ["sh", "-c", "/app/bin/collect && while true; do sleep 3600; done"]  # Run once on startup, then keep alive
     environment:
       - CONFIG_PATH=/app/config.yaml
       - DB_HOST=mysql
@@ -112,6 +112,7 @@ services:
       ofelia.enabled: "true"
       ofelia.job-exec.collect-weather.schedule: "@every 5m"
       ofelia.job-exec.collect-weather.command: "/app/bin/collect"
+      ofelia.job-exec.collect-weather.no-overlap: "true"
 
   # Store Consumer (long-running)
   store:
@@ -140,14 +141,31 @@ services:
     networks:
       - preempt-network
 
-  # Detector (runs periodically)
-  # TODO: make this a cronjob
+  # ML Trainer (long-running, processes ML jobs from Redis stream)
+  ml-trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-ml-trainer
+    command: ["python3", "internal/ml/train.py"]
+    environment:
+      - REDIS_ADDR=redis:6379
+    volumes:
+      - ml_models:/app/ml_models
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+  # Detector (runs periodically via ofelia)
   detector:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: preempt-detector
-    command: ["/app/bin/detect"]
+    command: ["sh", "-c", "sleep 10 && /app/bin/detect && while true; do sleep 3600; done"]
     environment:
       - CONFIG_PATH=/app/config.yaml
       - DB_HOST=mysql
@@ -164,9 +182,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
     networks:
       - preempt-network
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.detect-anomalies.schedule: "@every 5m"
+      ofelia.job-exec.detect-anomalies.command: "/app/bin/detect"
+      ofelia.job-exec.detect-anomalies.no-overlap: "true"
 
   # Frontend
   frontend:
@@ -189,3 +211,4 @@ networks:
 volumes:
   mysql_data:
   redis_data:
+  ml_models:

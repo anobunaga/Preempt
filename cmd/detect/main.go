@@ -2,17 +2,11 @@ package main
 
 import (
 	"log"
-	"os"
-	"os/signal"
 	"preempt/internal/config"
 	"preempt/internal/database"
 	"preempt/internal/detector"
-	"syscall"
-	"time"
-)
 
-const (
-	detectionInterval = 10 * time.Minute // Run anomaly detection every 10 minutes
+	"github.com/go-redis/redis/v8"
 )
 
 func main() {
@@ -27,32 +21,25 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize anomaly detector and alarm suggester
-	anomalyDetector := detector.NewAnomalyDetector()
+	// Initialize Redis client from environment variables
+	redisCfg := config.GetRedisConfig()
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     redisCfg.Addr,
+		Password: redisCfg.Password,
+		DB:       redisCfg.DB,
+	})
+	defer redisClient.Close()
+
+	// Initialize anomaly detector with Redis client and alarm suggester
+	anomalyDetector := detector.NewAnomalyDetector(redisClient)
 	alarmSuggester := detector.NewAlarmSuggester()
 
-	log.Println("Detector started, running anomaly detection every 10 minutes...")
+	log.Println("Running anomaly detection for all locations...")
 
-	// Run detection immediately on start
+	// Run detection once (ofelia will handle scheduling)
 	runDetectionForAllLocations(db, cfg, anomalyDetector, alarmSuggester)
 
-	// Run detection periodically
-	ticker := time.NewTicker(detectionInterval)
-	defer ticker.Stop()
-
-	// Setup graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	for {
-		select {
-		case <-ticker.C:
-			runDetectionForAllLocations(db, cfg, anomalyDetector, alarmSuggester)
-		case <-quit:
-			log.Println("Shutting down detector...")
-			return
-		}
-	}
+	log.Println("Detection run completed successfully")
 }
 
 func runDetectionForAllLocations(db *database.DB, cfg *config.Config, anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester) {

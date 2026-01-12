@@ -1,22 +1,24 @@
 package detector
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
-	"os"
-	"os/exec"
 	"preempt/internal/config"
 	"preempt/internal/database"
 	"preempt/internal/models"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 // AnomalyDetector detects anomalies in metrics data
 type AnomalyDetector struct {
 	zScoreThreshold float64 // Standard deviations from mean to flag as anomaly
 	cfg             *config.Config
+	redisClient     *redis.Client
 }
 
 // MLAnomalyResult represents the JSON output from the Python ML script
@@ -36,10 +38,11 @@ type MLAnomalyData struct {
 }
 
 // NewAnomalyDetector creates a new anomaly detector
-func NewAnomalyDetector() *AnomalyDetector {
+func NewAnomalyDetector(redisClient *redis.Client) *AnomalyDetector {
 	return &AnomalyDetector{
 		zScoreThreshold: 2.0, // Flag values more than 2 std devs from mean
 		cfg:             config.Get(),
+		redisClient:     redisClient,
 	}
 }
 
@@ -149,81 +152,165 @@ func (ad *AnomalyDetector) getStatsAnomalies(db *database.DB, location string) (
 
 func (ad *AnomalyDetector) getMLAnomalies(db *database.DB, location string) ([]models.Anomaly, error) {
 	var anomalies []models.Anomaly
-	// Export data to a temporary CSV file for Python to read
-	tempFile, err := os.Create("metrics.csv")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer os.Remove(tempFile.Name()) // Clean up
-	defer tempFile.Close()
-	fmt.Println("CSV file created at:", tempFile.Name())
-
-	// Write CSV header
-	if _, err := tempFile.WriteString("timestamp,metric_type,value\n"); err != nil {
-		return nil, fmt.Errorf("failed to write header: %w", err)
-	}
+	ctx := context.Background()
 
 	// Get all metrics from the last 30 days
 	metricTypes := ad.cfg.Weather.MonitoredFields
 	since := time.Now().AddDate(0, 0, -30)
-	metrics, err := db.GetMetrics(location, metricTypes, since) // Get all metric types
+	metrics, err := db.GetMetrics(location, metricTypes, since)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metrics: %w", err)
 	}
 
 	if len(metrics) < 10 {
 		log.Printf("Not enough data for ML training (need at least 10, got %d)", len(metrics))
-		return anomalies, nil // Return empty list, not an error
+		return anomalies, nil
 	}
 
-	// Write metrics to CSV
+	// Convert metrics to JSON format for Redis
+	type MetricData struct {
+		Timestamp  string  `json:"timestamp"`
+		MetricType string  `json:"metric_type"`
+		Value      float64 `json:"value"`
+	}
+
+	var metricsData []MetricData
 	for _, m := range metrics {
-		line := fmt.Sprintf("%s,%s,%.2f\n", m.Timestamp.Format(time.RFC3339), m.MetricType, m.Value)
-		if _, err := tempFile.WriteString(line); err != nil {
-			return nil, fmt.Errorf("failed to write metric: %w", err)
-		}
+		metricsData = append(metricsData, MetricData{
+			Timestamp:  m.Timestamp.Format(time.RFC3339),
+			MetricType: m.MetricType,
+			Value:      m.Value,
+		})
 	}
-	tempFile.Close()
 
-	// Run the Python script and capture output
-	cmd := exec.Command("python3", "internal/ml/train.py", tempFile.Name())
-	output, err := cmd.CombinedOutput()
+	// Create unique job ID
+	jobID := fmt.Sprintf("%s_%d", location, time.Now().Unix())
+
+	// Get current position in ml_output stream before publishing job
+	lastID := "0-0"
+	lastMessages, err := ad.redisClient.XRevRangeN(ctx, "ml_output", "+", "-", 1).Result()
+	if err == nil && len(lastMessages) > 0 {
+		lastID = lastMessages[0].ID
+	}
+
+	// Publish metrics to Redis stream for ML processing
+	payload := map[string]interface{}{
+		"location": location,
+		"metrics":  metricsData,
+		"job_id":   jobID,
+	}
+
+	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run train.py: %w, output: %s", err, string(output))
+		return nil, fmt.Errorf("failed to marshal metrics: %w", err)
 	}
 
-	log.Printf("ML model output: %s", string(output))
-
-	// Parse the JSON output from Python
-	var result MLAnomalyResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse ML output as JSON: %w, output: %s", err, string(output))
+	// Send to ML input stream
+	err = ad.redisClient.XAdd(ctx, &redis.XAddArgs{
+		Stream: "ml_input",
+		Values: map[string]interface{}{"data": string(data)},
+	}).Err()
+	if err != nil {
+		return nil, fmt.Errorf("failed to publish to Redis ML stream: %w", err)
 	}
 
-	log.Printf("ML processed %d metric types and found %d total anomalies", result.ModelsSaved, result.TotalAnomaliesFound)
-	log.Printf("Metrics processed: %v", result.MetricsProcessed)
+	log.Printf("Published %d metrics to ML input stream for location %s (job_id: %s)", len(metricsData), location, jobID)
 
-	// Convert ML anomalies to our Anomaly model
-	for _, mlAnomaly := range result.Anomalies {
-		// Parse timestamp
-		timestamp, err := time.Parse(time.RFC3339, mlAnomaly.Timestamp)
-		if err != nil {
-			log.Printf("Failed to parse timestamp %s: %v", mlAnomaly.Timestamp, err)
-			continue
+	// Wait for ML results (with timeout)
+	timeout := time.After(60 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return nil, fmt.Errorf("timeout waiting for ML results for job %s", jobID)
+		case <-ticker.C:
+			// Read messages published after we sent the job
+			messages, err := ad.redisClient.XRead(ctx, &redis.XReadArgs{
+				Streams: []string{"ml_output", lastID},
+				Count:   10,
+				Block:   0,
+			}).Result()
+
+			if err != nil {
+				log.Printf("Error reading from ml_output: %v", err)
+				continue
+			}
+
+			if len(messages) == 0 {
+				continue
+			}
+
+			// Look for our job results
+			foundJobIDs := []string{}
+			for _, message := range messages {
+				for _, msg := range message.Messages {
+					dataStr, ok := msg.Values["data"].(string)
+					if !ok {
+						log.Printf("Warning: message has no 'data' field")
+						continue
+					}
+
+					var result struct {
+						JobID               string          `json:"job_id"`
+						Location            string          `json:"location"`
+						ModelsSaved         int             `json:"models_saved"`
+						TotalAnomaliesFound int             `json:"total_anomalies_found"`
+						Anomalies           []MLAnomalyData `json:"anomalies"`
+						MetricsProcessed    []string        `json:"metrics_processed"`
+					}
+
+					if err := json.Unmarshal([]byte(dataStr), &result); err != nil {
+						log.Printf("Failed to parse ML result: %v", err)
+						continue
+					}
+
+					foundJobIDs = append(foundJobIDs, result.JobID)
+
+					// Check if this is our job
+					if result.JobID == jobID {
+						log.Printf("✓ Found matching job %s!", jobID)
+						log.Printf("ML processed %d metric types and found %d total anomalies for %s",
+							result.ModelsSaved, result.TotalAnomaliesFound, location)
+						log.Printf("Metrics processed: %v", result.MetricsProcessed)
+
+						// Convert ML anomalies to our Anomaly model
+						for _, mlAnomaly := range result.Anomalies {
+							timestamp, err := time.Parse(time.RFC3339, mlAnomaly.Timestamp)
+							if err != nil {
+								log.Printf("Failed to parse timestamp %s: %v", mlAnomaly.Timestamp, err)
+								continue
+							}
+
+							anomaly := models.Anomaly{
+								Location:   location,
+								Timestamp:  timestamp,
+								MetricType: mlAnomaly.MetricType,
+								Value:      mlAnomaly.Value,
+								ZScore:     mlAnomaly.AnomalyScore,
+								Severity:   mlAnomaly.Severity,
+							}
+							anomalies = append(anomalies, anomaly)
+						}
+
+						// Trim streams to prevent unbounded growth (keep last 500 messages)
+						ad.redisClient.XTrimMaxLen(ctx, "ml_input", 500).Err()
+						ad.redisClient.XTrimMaxLen(ctx, "ml_output", 500).Err()
+
+						return anomalies, nil
+					}
+				}
+			}
+
+			// Log all job_ids we found (for debugging)
+			if len(foundJobIDs) > 0 && len(foundJobIDs) <= 10 {
+				log.Printf("Job %s not found. Found job_ids: %v", jobID, foundJobIDs)
+			} else if len(foundJobIDs) > 10 {
+				log.Printf("Job %s not found. Checked %d jobs (showing first 10): %v", jobID, len(foundJobIDs), foundJobIDs[:10])
+			}
 		}
-
-		anomaly := models.Anomaly{
-			Location:   location,
-			Timestamp:  timestamp,
-			MetricType: mlAnomaly.MetricType,
-			Value:      mlAnomaly.Value,
-			ZScore:     mlAnomaly.AnomalyScore, // Use anomaly score as Z-score equivalent
-			Severity:   mlAnomaly.Severity,
-		}
-		anomalies = append(anomalies, anomaly)
 	}
-
-	return anomalies, nil
 }
 
 // calculateSeverityFromZScore determines severity based on Z-score

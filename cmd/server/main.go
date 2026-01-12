@@ -7,6 +7,8 @@ import (
 	"preempt/internal/database"
 	"preempt/internal/detector"
 	"preempt/internal/server"
+
+	"github.com/go-redis/redis/v8"
 )
 
 func main() {
@@ -14,6 +16,7 @@ func main() {
 	if _, err := config.Load("./config.yaml"); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	cfg := config.Get()
 
 	// Initialize database
 	db, err := database.NewDB(config.GetDatabaseDSN())
@@ -22,8 +25,16 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer redisClient.Close()
+
 	openMeteoClient := api.NewOpenMeteoClient()
-	anomalyDetector := detector.NewAnomalyDetector()
+	anomalyDetector := detector.NewAnomalyDetector(redisClient)
 
 	srv := server.NewServer(db, openMeteoClient, anomalyDetector)
 
