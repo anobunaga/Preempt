@@ -1,7 +1,5 @@
--- Initialize Preempt Database Schema
--- This file is automatically executed when MySQL container starts
-
-USE preempt;
+-- Initial schema migration
+-- Creates tables for metrics, anomalies, and alarm suggestions
 
 -- Metrics table
 CREATE TABLE IF NOT EXISTS metrics (

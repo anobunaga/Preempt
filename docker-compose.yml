@@ -14,12 +14,29 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - preempt-network
+
+  # Database Migration Service
+  migrate:
+    image: migrate/migrate:latest
+    container_name: preempt-migrate
+    volumes:
+      - ./migrations:/migrations
+    command: [
+      "-path", "/migrations",
+      "-database", "mysql://myapp:mypassword123@tcp(mysql:3306)/preempt",
+      "up"
+    ]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: on-failure
     networks:
       - preempt-network
 
