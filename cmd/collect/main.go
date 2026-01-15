@@ -7,13 +7,17 @@ import (
 	"preempt/internal/api"
 	"preempt/internal/config"
 	"preempt/internal/database"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
 
 const (
-	historicalDays = 7
+	historicalDays        = 7
+	maxConcurrentRequests = 2 // Limit concurrent API requests
+	maxRetries            = 3
 )
 
 func main() {
@@ -43,6 +47,8 @@ func main() {
 		log.Fatalf("Failed to get locations with data: %v", err)
 	}
 
+	// Semaphore to limit concurrent API requests
+	semaphore := make(chan struct{}, maxConcurrentRequests)
 	var wg sync.WaitGroup
 
 	// Check each location and fetch historical data only for new locations
@@ -51,22 +57,57 @@ func main() {
 		go func(loc config.Location) {
 			defer wg.Done()
 
-			if !locationsWithData[loc.Name] {
-				log.Printf("New location detected: %s - Fetching historical data", loc.Name)
-				forecast, err := client.GetHistoricalHourlyData(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields, historicalDays)
-				if err != nil {
-					log.Printf("Failed to fetch historical forecast for %s: %v", loc.Name, err)
+			// Acquire semaphore (blocks if max concurrent requests reached)
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// Retry with exponential backoff
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				var err error
+				var success bool
+
+				if !locationsWithData[loc.Name] {
+					if attempt > 0 {
+						log.Printf("Retry %d/%d: Fetching historical data for %s", attempt+1, maxRetries, loc.Name)
+					} else {
+						log.Printf("New location detected: %s - Fetching historical data", loc.Name)
+					}
+					forecast, fetchErr := client.GetHistoricalHourlyData(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields, historicalDays)
+					err = fetchErr
+					if err == nil {
+						sendToRedis(redisClient, forecast, loc, cfg.Weather.MonitoredFields, "historical")
+						success = true
+					}
+				} else {
+					if attempt > 0 {
+						log.Printf("Retry %d/%d: Fetching current data for %s", attempt+1, maxRetries, loc.Name)
+					} else {
+						log.Printf("Fetching current weather data for: %s", loc.Name)
+					}
+					weatherData, fetchErr := client.GetCurrentWeather(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields)
+					err = fetchErr
+					if err == nil {
+						sendToRedis(redisClient, weatherData, loc, cfg.Weather.MonitoredFields, "current")
+						success = true
+					}
+				}
+
+				if success {
 					return
 				}
-				sendToRedis(redisClient, forecast, loc, cfg.Weather.MonitoredFields, "historical")
-			} else {
-				log.Printf("Fetching current weather data for: %s", loc.Name)
-				weatherData, err := client.GetCurrentWeather(loc.Latitude, loc.Longitude, cfg.Weather.MonitoredFields)
-				if err != nil {
-					log.Printf("Failed to fetch current weather data for %s: %v", loc.Name, err)
-					return
+
+				// Check if rate limit error (429)
+				isRateLimitError := strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Too many")
+
+				if isRateLimitError && attempt < maxRetries-1 {
+					backoff := time.Duration(1<<uint(attempt)) * time.Second // 1s, 2s, 4s
+					log.Printf("Rate limit error for %s, retrying in %v", loc.Name, backoff)
+					time.Sleep(backoff)
+					continue
 				}
-				sendToRedis(redisClient, weatherData, loc, cfg.Weather.MonitoredFields, "current")
+
+				log.Printf("Failed to fetch data for %s: %v", loc.Name, err)
+				return
 			}
 		}(location)
 	}
