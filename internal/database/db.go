@@ -386,3 +386,66 @@ func (db *DB) GetLocationsWithData() (map[string]bool, error) {
 
 	return locations, nil
 }
+
+// Location represents a location in the database
+type Location struct {
+	ID        int64   `json:"id"`
+	Name      string  `json:"name"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// InsertLocation inserts a new location into the database
+func (db *DB) InsertLocation(name string, latitude, longitude float64) error {
+	query := `INSERT INTO locations (name, latitude, longitude) VALUES (?, ?, ?)`
+	_, err := db.conn.Exec(query, name, latitude, longitude)
+	if err != nil {
+		// Check if it's a duplicate key error
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return fmt.Errorf("duplicate location")
+		}
+		return fmt.Errorf("failed to insert location: %w", err)
+	}
+	return nil
+}
+
+// GetAllLocations retrieves all locations from the database
+func (db *DB) GetAllLocations() ([]Location, error) {
+	query := `SELECT id, name, latitude, longitude FROM locations ORDER BY name`
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query locations: %w", err)
+	}
+	defer rows.Close()
+
+	var locations []Location
+	for rows.Next() {
+		var loc Location
+		if err := rows.Scan(&loc.ID, &loc.Name, &loc.Latitude, &loc.Longitude); err != nil {
+			return nil, fmt.Errorf("failed to scan location: %w", err)
+		}
+		locations = append(locations, loc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating locations: %w", err)
+	}
+
+	return locations, nil
+}
+
+// GetLocationByName retrieves a specific location by name
+func (db *DB) GetLocationByName(name string) (*Location, error) {
+	query := `SELECT id, name, latitude, longitude FROM locations WHERE name = ? LIMIT 1`
+	row := db.conn.QueryRow(query, name)
+
+	var loc Location
+	if err := row.Scan(&loc.ID, &loc.Name, &loc.Latitude, &loc.Longitude); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("location not found: %s", name)
+		}
+		return nil, fmt.Errorf("failed to scan location: %w", err)
+	}
+
+	return &loc, nil
+}

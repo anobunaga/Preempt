@@ -1,13 +1,15 @@
 // Types for the Preempt API
 
 export interface Location {
-  Name: string;
-  Latitude: number;
-  Longitude: number;
+  id?: number;
+  name: string;
+  latitude: number;
+  longitude: number;
 }
 
 export interface LocationsResponse {
   locations: Location[];
+  count?: number;
 }
 
 export interface HealthResponse {

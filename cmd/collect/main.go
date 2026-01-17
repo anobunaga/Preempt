@@ -39,6 +39,18 @@ func main() {
 	}
 	defer db.Close()
 
+	// Get all locations from database
+	locations, err := db.GetAllLocations()
+	if err != nil {
+		log.Fatalf("Failed to get locations from database: %v", err)
+	}
+
+	if len(locations) == 0 {
+		log.Fatalf("No locations found in database. Please run the seed script first.")
+	}
+
+	log.Printf("Found %d locations in database", len(locations))
+
 	client := api.NewOpenMeteoClient()
 
 	// Get all locations that already have data in the database
@@ -52,9 +64,9 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Check each location and fetch historical data only for new locations
-	for _, location := range cfg.Weather.Locations {
+	for _, location := range locations {
 		wg.Add(1)
-		go func(loc config.Location) {
+		go func(loc database.Location) {
 			defer wg.Done()
 
 			// Acquire semaphore (blocks if max concurrent requests reached)
@@ -117,10 +129,14 @@ func main() {
 }
 
 // sendToRedis serializes the forecast data and publishes it to a Redis stream
-func sendToRedis(redisClient *redis.Client, forecast interface{}, location config.Location, fields []string, dataType string) {
+func sendToRedis(redisClient *redis.Client, forecast interface{}, location database.Location, fields []string, dataType string) {
 	// Serialize forecast and publish to Redis stream
 	data, err := json.Marshal(map[string]interface{}{
-		"location": location,
+		"location": map[string]interface{}{
+			"name":      location.Name,
+			"latitude":  location.Latitude,
+			"longitude": location.Longitude,
+		},
 		"forecast": forecast,
 		"fields":   fields,
 		"type":     dataType,

@@ -8,12 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Location struct {
-	Name      string  `yaml:"name"`
-	Latitude  float64 `yaml:"latitude"`
-	Longitude float64 `yaml:"longitude"`
-}
-
 var (
 	instance *Config
 	once     sync.Once
@@ -22,8 +16,7 @@ var (
 // Config - can/will add more later
 type Config struct {
 	Weather struct {
-		MonitoredFields []string   `yaml:"monitored_fields"`
-		Locations       []Location `yaml:"locations"`
+		MonitoredFields []string `yaml:"monitored_fields"`
 	} `yaml:"weather"`
 	Redis struct {
 		Addr     string `yaml:"addr"`
