@@ -16,7 +16,7 @@ type DB struct {
 	conn *sql.DB
 }
 
-// NewDB creates a new database connection and initializes the schema
+// NewDB creates a new database connection
 // dsn format: "username:password@tcp(host:port)/dbname?parseTime=true"
 // example: "user:pass@tcp(localhost:3306)/preempt?parseTime=true"
 func NewDB(dsn string) (*DB, error) {
@@ -35,65 +35,7 @@ func NewDB(dsn string) (*DB, error) {
 	conn.SetMaxIdleConns(5)
 	conn.SetConnMaxLifetime(5 * time.Minute)
 
-	db := &DB{conn: conn}
-
-	// Initialize schema
-	if err := db.initSchema(); err != nil {
-		return nil, fmt.Errorf("failed to initialize schema: %w", err)
-	}
-
-	return db, nil
-}
-
-// initSchema creates the necessary tables
-func (db *DB) initSchema() error {
-	// MySQL doesn't support multiple statements in one Exec, so we need to split them
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS metrics (
-			id BIGINT AUTO_INCREMENT PRIMARY KEY,
-			location VARCHAR(255) NOT NULL DEFAULT '',
-			timestamp DATETIME(6) NOT NULL,
-			metric_type VARCHAR(100) NOT NULL,
-			value DOUBLE NOT NULL,
-			INDEX idx_metrics_timestamp (timestamp),
-			INDEX idx_metrics_type (metric_type),
-			INDEX idx_metrics_location (location)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-		`CREATE TABLE IF NOT EXISTS anomalies (
-			id BIGINT AUTO_INCREMENT PRIMARY KEY,
-			location VARCHAR(255) NOT NULL DEFAULT '',
-			timestamp DATETIME(6) NOT NULL,
-			metric_type VARCHAR(100) NOT NULL,
-			value DOUBLE NOT NULL,
-			z_score DOUBLE NOT NULL,
-			severity VARCHAR(50) NOT NULL,
-			INDEX idx_anomalies_timestamp (timestamp),
-			INDEX idx_anomalies_type (metric_type),
-			INDEX idx_anomalies_location (location)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-		`CREATE TABLE IF NOT EXISTS alarm_suggestions (
-			id BIGINT AUTO_INCREMENT PRIMARY KEY,
-			location VARCHAR(255) NOT NULL DEFAULT '',
-			metric_type VARCHAR(100) NOT NULL,
-			threshold DOUBLE NOT NULL,
-			operator VARCHAR(10) NOT NULL,
-			suggested_at DATETIME(6) NOT NULL,
-			confidence DOUBLE NOT NULL,
-			description TEXT NOT NULL,
-			anomaly_count INT NOT NULL,
-			INDEX idx_alarm_suggestions_location (location)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-	}
-
-	for _, stmt := range statements {
-		if _, err := db.conn.Exec(stmt); err != nil {
-			return fmt.Errorf("failed to execute schema statement: %w", err)
-		}
-	}
-
-	return nil
+	return &DB{conn: conn}, nil
 }
 
 // StoreMetrics stores all current metrics from the forecast
