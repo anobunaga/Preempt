@@ -12,7 +12,6 @@ import (
 func main() {
 	// Load config
 	config.Load("./config.yaml")
-	cfg := config.Get()
 
 	// Initialize database
 	db, err := database.NewDB(config.GetDatabaseDSN())
@@ -20,6 +19,18 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// Get all locations from database
+	locations, err := db.GetAllLocations()
+	if err != nil {
+		log.Fatalf("Failed to get locations from database: %v", err)
+	}
+
+	if len(locations) == 0 {
+		log.Fatalf("No locations found in database. Please run the seed script first.")
+	}
+
+	log.Printf("Found %d locations in database", len(locations))
 
 	// Initialize Redis client from environment variables
 	redisCfg := config.GetRedisConfig()
@@ -37,18 +48,18 @@ func main() {
 	log.Println("Running anomaly detection for all locations...")
 
 	// Run detection once (ofelia will handle scheduling)
-	runDetectionForAllLocations(db, cfg, anomalyDetector, alarmSuggester)
+	runDetectionForAllLocations(db, locations, anomalyDetector, alarmSuggester)
 
 	log.Println("Detection run completed successfully")
 }
 
-func runDetectionForAllLocations(db *database.DB, cfg *config.Config, anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester) {
+func runDetectionForAllLocations(db *database.DB, locations []database.Location, anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester) {
 	log.Println("Running anomaly detection for all locations...")
 
 	totalAnomalies := 0
 	totalSuggestions := 0
 
-	for _, location := range cfg.Weather.Locations {
+	for _, location := range locations {
 		log.Printf("Detecting anomalies for %s", location.Name)
 
 		// Detect anomalies for this location

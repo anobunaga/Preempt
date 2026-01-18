@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import './App.css';
-import type { HealthResponse, FetchResponse, MetricsResponse, AnomaliesResponse, AlarmSuggestionsResponse, FetchRequest, LocationsResponse, Location } from './types';
+import type { HealthResponse, MetricsResponse, AnomaliesResponse, AlarmSuggestionsResponse, LocationsResponse, Location } from './types';
 
 const API_BASE = '/api';
 
 function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [currentWeather, setCurrentWeather] = useState<FetchResponse | null>(null);
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [anomalies, setAnomalies] = useState<AnomaliesResponse | null>(null);
   const [suggestions, setSuggestions] = useState<AlarmSuggestionsResponse | null>(null);
@@ -23,14 +22,29 @@ function App() {
   const fetchLocations = async () => {
     try {
       const res = await fetch(`${API_BASE}/locations`);
+      if (!res.ok) {
+        console.error('API request failed:', res.status, res.statusText);
+        const text = await res.text();
+        console.error('Error response:', text);
+        return;
+      }
       const data: LocationsResponse = await res.json();
       console.log('Locations response:', data);
       console.log('Locations array:', data.locations);
+      console.log('First location:', data.locations?.[0]);
+      
+      if (!data.locations || !Array.isArray(data.locations)) {
+        console.error('Invalid locations data:', data);
+        return;
+      }
+      
       setLocations(data.locations);
       // Set first location as default if available
       if (data.locations.length > 0) {
         setSelectedLocation(data.locations[0]);
         console.log('Selected first location:', data.locations[0]);
+      } else {
+        console.warn('No locations returned from API');
       }
     } catch (err) {
       console.error('Failed to fetch locations:', err);
@@ -38,10 +52,10 @@ function App() {
   };
 
   const getLocationString = (location: Location | null): string => {
-    if (!location || !location.Name) {
+    if (!location || !location.name) {
       return 'Unknown';
     }
-    return location.Name;
+    return location.name;
   };
 
   const fetchHealth = async () => {
@@ -49,35 +63,6 @@ function App() {
       const res = await fetch(`${API_BASE}/health`);
       const data: HealthResponse = await res.json();
       setHealth(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchCurrentWeather = async () => {
-    if (!selectedLocation) {
-      alert('Please select a location first');
-      return;
-    }
-    try {
-      const req: FetchRequest = { 
-        latitude: selectedLocation.Latitude, 
-        longitude: selectedLocation.Longitude 
-      };
-      const locationStr = getLocationString(selectedLocation);
-      const res = await fetch(`${API_BASE}/fetch-current-weather?location=${encodeURIComponent(locationStr)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-      });
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Server error:', errorText);
-        alert(`Error: ${errorText}`);
-        return;
-      }
-      const data: FetchResponse = await res.json();
-      setCurrentWeather(data);
     } catch (err) {
       console.error(err);
     }
@@ -142,12 +127,12 @@ function App() {
             >
               {locations.map((loc, idx) => (
                 <option key={idx} value={idx}>
-                  {loc?.Name || 'Unknown'}
+                  {loc?.name || 'Unknown'}
                 </option>
               ))}
             </select>
             {selectedLocation && (
-              <p><strong>Selected:</strong> {selectedLocation.Name}</p>
+              <p><strong>Selected:</strong> {selectedLocation.name}</p>
             )}
           </>
         ) : (
@@ -159,12 +144,6 @@ function App() {
         <h2>Health Check</h2>
         <button onClick={fetchHealth}>Check Health</button>
         {health && <pre>{JSON.stringify(health, null, 2)}</pre>}
-      </section>
-
-      <section>
-        <h2>Fetch Current Weather</h2>
-        <button onClick={fetchCurrentWeather} disabled={!selectedLocation}>Fetch Weather</button>
-        {currentWeather && <pre>{JSON.stringify(currentWeather, null, 2)}</pre>}
       </section>
 
       <section>

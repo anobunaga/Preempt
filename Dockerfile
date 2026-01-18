@@ -12,6 +12,7 @@ RUN go build -o /app/bin/server ./cmd/server
 RUN go build -o /app/bin/collect ./cmd/collect
 RUN go build -o /app/bin/store ./cmd/store
 RUN go build -o /app/bin/detect ./cmd/detect
+RUN go build -o /app/bin/seed ./cmd/seed
 
 
 FROM python:3.11-slim

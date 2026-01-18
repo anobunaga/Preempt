@@ -1,10 +1,11 @@
-.PHONY: all build clean collect store detect server help
+.PHONY: all build clean collect store detect server seed help
 
 # Binary names (in current directory)
 COLLECT_BIN=collect
 STORE_BIN=store
 DETECT_BIN=detect
 SERVER_BIN=server
+SEED_BIN=seed
 
 # Install location
 INSTALL_DIR?=/usr/local/bin
@@ -42,11 +43,21 @@ server:
 	@echo "Building server..."
 	$(GOBUILD) -o $(SERVER_BIN) ./cmd/server
 
+## seed: Build the seed service
+seed:
+	@echo "Building seed..."
+	$(GOBUILD) -o $(SEED_BIN) ./cmd/seed
+
+## seed-locations: Import locations from CSV file into database
+seed-locations: seed
+	@echo "Seeding locations from CSV..."
+	./$(SEED_BIN)
+
 ## clean: Remove build artifacts
 clean:
 	@echo "Cleaning..."
 	$(GOCLEAN)
-	rm -f $(COLLECT_BIN) $(STORE_BIN) $(DETECT_BIN) $(SERVER_BIN)
+	rm -f $(COLLECT_BIN) $(STORE_BIN) $(DETECT_BIN) $(SERVER_BIN) $(SEED_BIN)
 	rm -f metrics.csv
 
 ## test: Run tests

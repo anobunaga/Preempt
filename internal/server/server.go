@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"preempt/internal/api"
 	"preempt/internal/config"
@@ -39,7 +38,6 @@ func NewServer(db *database.DB, client *api.OpenMeteoClient, ad *detector.Anomal
 	// Register routes
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/locations", s.handleLocations)
-	s.mux.HandleFunc("/fetch-current-weather", s.handleFetchCurrentWeather)
 	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("/anomalies", s.handleAnomalies)
 	s.mux.HandleFunc("/alarm-suggestions", s.handleAlarmSuggestions)
@@ -61,70 +59,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLocations returns available locations from config
+// handleLocations returns available locations from database
 func (s *Server) handleLocations(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	config.Load("./config.yaml")
-	cfg := config.Get()
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"locations": cfg.Weather.Locations,
-	})
-}
 
-// handleFetch manually triggers a data fetch
-func (s *Server) handleFetchCurrentWeather(w http.ResponseWriter, r *http.Request) {
-	location := r.URL.Query().Get("location")
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req FetchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.Latitude < -90 || req.Latitude > 90 {
-		http.Error(w, "Latitude must be between -90 and 90", http.StatusBadRequest)
-		return
-	}
-
-	if req.Longitude < -180 || req.Longitude > 180 {
-		http.Error(w, "Longitude must be between -180 and 180", http.StatusBadRequest)
-		return
-	}
-
-	forecast, err := s.apiClient.GetCurrentWeather(req.Latitude, req.Longitude, config.Get().Weather.MonitoredFields)
+	locations, err := s.db.GetAllLocations()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch locations: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// can be asynchronous
-	log.Println("location: ", location)
-	if err := s.db.StoreMetrics(forecast, location, config.Get().Weather.MonitoredFields, false); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// can be asynchronous
-	anomalies, err := s.anomalyDetector.DetectAnomalies(s.db, location)
-	if err != nil {
-		log.Fatalf("Failed to fetch anomalies: %v", err)
-	}
-	for _, anomaly := range anomalies {
-		if err := s.db.StoreAnomaly(&anomaly); err != nil {
-			continue
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "success",
-		"anomalies": len(anomalies),
-		"timestamp": time.Now(),
-		"forecast":  forecast.Current,
+		"locations": locations,
+		"count":     len(locations),
 	})
 }
 

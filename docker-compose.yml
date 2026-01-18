@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MySQL Database
   mysql:
@@ -37,6 +35,32 @@ services:
       mysql:
         condition: service_healthy
     restart: on-failure
+    networks:
+      - preempt-network
+
+  # Location Seed Service (runs once after migrations)
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: preempt-seed
+    command: ["/app/bin/seed"]
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=myapp
+      - DB_PASSWORD=mypassword123
+      - DB_NAME=preempt
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./cmd/seed/locations_seed.csv:/app/locations_seed.csv
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+    restart: "no"  # Only run once, not on failure
     networks:
       - preempt-network
 
@@ -81,6 +105,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - preempt-network
@@ -94,9 +120,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+      collector:
+        condition: service_started
+      detector:
+        condition: service_started
     command: daemon --docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
     networks:
       - preempt-network
 
@@ -123,6 +156,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     networks:
       - preempt-network
     labels:
@@ -199,6 +234,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     networks:
       - preempt-network
     labels:

@@ -106,7 +106,11 @@ func main() {
 
 				// Unmarshal the data
 				var payload struct {
-					Location config.Location `json:"location"`
+					Location struct {
+						Name      string  `json:"name"`
+						Latitude  float64 `json:"latitude"`
+						Longitude float64 `json:"longitude"`
+					} `json:"location"`
 					Forecast json.RawMessage `json:"forecast"`
 					Fields   []string        `json:"fields"`
 					Type     string          `json:"type"`
