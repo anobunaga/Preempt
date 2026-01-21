@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: preempt
+  labels:
+    app: migrate
+    tier: migration
+spec:
+  backoffLimit: 4  # Retry up to 4 times if fails
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      restartPolicy: OnFailure
+      # Init container to wait for MySQL to be ready
+      initContainers:
+      - name: wait-for-mysql
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for MySQL to be ready..."
+          until nc -z mysql 3306; do
+            echo "MySQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "MySQL is up - proceeding with migration"
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+      containers:
+      - name: migrate
+        image: migrate/migrate:latest
+        command:
+        - sh
+        - -c
+        - |
+          migrate \
+            -path /migrations \
+            -database "mysql://myapp:mypassword123@tcp(mysql:3306)/preempt" \
+            up
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: migrations
+        hostPath:
+          path: /Users/adamnobunaga/projects/Preempt/migrations
+          type: Directory

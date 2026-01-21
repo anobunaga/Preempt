@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: preempt
+  labels:
+    app: api
+    tier: backend
+spec:
+  replicas: 2  # Can scale horizontally
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        tier: backend
+    spec:
+      containers:
+      - name: api
+        image: preempt-backend:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/app/bin/server"]
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: CONFIG_PATH
+          value: /app/config.yaml
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PASSWORD
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_NAME
+        - name: REDIS_ADDR
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_ADDR
+        - name: REDIS_STREAM
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_STREAM
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: preempt-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: preempt
+  labels:
+    app: api
+spec:
+  type: ClusterIP  # Internal service
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: api

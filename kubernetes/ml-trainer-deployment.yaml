@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-trainer
+  namespace: preempt
+  labels:
+    app: ml-trainer
+    tier: ml
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-trainer
+  template:
+    metadata:
+      labels:
+        app: ml-trainer
+        tier: ml
+    spec:
+      containers:
+      - name: ml-trainer
+        image: preempt-backend:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "internal/ml/train.py"]
+        env:
+        - name: REDIS_ADDR
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_ADDR
+        volumeMounts:
+        - name: ml-models
+          mountPath: /app/ml_models
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: ml-models
+        persistentVolumeClaim:
+          claimName: ml-models-pvc
