@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: preempt-config
+  namespace: preempt
+data:
+  config.yaml: |
+    weather:
+      monitored_fields:
+        - temperature_2m
+        - relative_humidity_2m
+        - precipitation
+        - wind_speed_10m
+        - dew_point_2m
+    
+    redis:
+      addr: "redis:6379"
+      password: ""
+      db: 0
+      stream: "weather_metrics"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: preempt
+data:
+  # This can be used for any init scripts if needed
+  init.sql: |
+    -- MySQL initialization (if needed)
+    SELECT 'MySQL initialized' AS message;

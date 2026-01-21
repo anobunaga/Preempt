@@ -1,0 +1,85 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: collector
+  namespace: preempt
+  labels:
+    app: collector
+    tier: backend
+spec:
+  # Run every 5 minutes
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid  # Don't allow overlapping runs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      backoffLimit: 2  # Retry twice on failure
+      template:
+        metadata:
+          labels:
+            app: collector
+            tier: backend
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: collector
+            image: preempt-backend:latest
+            imagePullPolicy: IfNotPresent
+            command: ["/app/bin/collect"]
+            env:
+            - name: CONFIG_PATH
+              value: /app/config.yaml
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: DB_NAME
+            - name: REDIS_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_ADDR
+            - name: REDIS_STREAM
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_STREAM
+            volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "400m"
+          volumes:
+          - name: config
+            configMap:
+              name: preempt-config
