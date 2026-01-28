@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"preempt/internal/config"
 	"preempt/internal/database"
+	_ "preempt/internal/metrics"
 	"preempt/internal/models"
 	"syscall"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -66,6 +69,16 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start metrics endpoint on port 8081
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/prometheus", promhttp.Handler())
+		log.Println("Store metrics endpoint started on :8081/prometheus")
+		if err := http.ListenAndServe(":8081", mux); err != nil {
+			log.Printf("Metrics endpoint error: %v", err)
+		}
+	}()
 
 	// Handle shutdown signal
 	go func() {

@@ -6,6 +6,7 @@ import (
 	"preempt/internal/config"
 	"preempt/internal/database"
 	"preempt/internal/detector"
+	_ "preempt/internal/metrics" // Register Prometheus metrics
 	"preempt/internal/server"
 
 	"github.com/go-redis/redis/v8"
