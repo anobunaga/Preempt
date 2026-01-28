@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'development'
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # API service (database metrics)
+  - job_name: 'api'
+    metrics_path: '/prometheus'
+    static_configs:
+      - targets: ['api:8080']
+        labels:
+          service: 'api'
+
+  # Store service (database write metrics)
+  - job_name: 'store'
+    metrics_path: '/prometheus'
+    static_configs:
+      - targets: ['store:8081']
+        labels:
+          service: 'store'
