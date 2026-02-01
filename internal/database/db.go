@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"preempt/internal/metrics"
 	"preempt/internal/models"
 	"strings"
 	"time"
@@ -145,7 +146,9 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, location string, fie
 			}
 
 			query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+			queryStart := time.Now()
 			_, err = db.conn.Exec(query, location, timestamp, fieldName, value)
+			metrics.RecordDBQuery("INSERT", "metrics", time.Since(queryStart), err)
 			if err != nil {
 				return fmt.Errorf("failed to store hourly metric %s at %s: %w",
 					fieldName, timestamps[i], err)
@@ -157,6 +160,11 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, location string, fie
 }
 
 func (db *DB) storeCurrentMetrics(forecast *models.Forecast, location string, fields []string) error {
+	defer func() {
+		stats := db.conn.Stats()
+		metrics.UpdateDBConnectionStats(stats.OpenConnections, stats.InUse, stats.Idle)
+	}()
+
 	now := time.Now()
 
 	fieldData := map[string]*float64{
@@ -181,7 +189,9 @@ func (db *DB) storeCurrentMetrics(forecast *models.Forecast, location string, fi
 		}
 
 		query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+		queryStart := time.Now()
 		_, err := db.conn.Exec(query, location, now, fieldName, *value)
+		metrics.RecordDBQuery("INSERT", "metrics", time.Since(queryStart), err)
 		if err != nil {
 			return fmt.Errorf("failed to store current metric %s: %w", fieldName, err)
 		}
@@ -194,8 +204,15 @@ func (db *DB) storeCurrentMetrics(forecast *models.Forecast, location string, fi
 
 // StoreAnomaly stores a detected anomaly
 func (db *DB) StoreAnomaly(anomaly *models.Anomaly) error {
+	queryStart := time.Now()
+	defer func() {
+		stats := db.conn.Stats()
+		metrics.UpdateDBConnectionStats(stats.OpenConnections, stats.InUse, stats.Idle)
+	}()
+
 	query := `INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?, ?)`
 	_, err := db.conn.Exec(query, anomaly.Location, anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
+	metrics.RecordDBQuery("INSERT", "anomalies", time.Since(queryStart), err)
 	return err
 }
 

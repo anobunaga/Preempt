@@ -9,6 +9,8 @@ import (
 	"preempt/internal/detector"
 	"strconv"
 	"time"
+	
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type FetchRequest struct {
@@ -41,6 +43,7 @@ func NewServer(db *database.DB, client *api.OpenMeteoClient, ad *detector.Anomal
 	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("/anomalies", s.handleAnomalies)
 	s.mux.HandleFunc("/alarm-suggestions", s.handleAlarmSuggestions)
+	s.mux.Handle("/prometheus", promhttp.Handler())
 
 	return s
 }

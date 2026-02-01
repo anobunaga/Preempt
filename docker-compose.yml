@@ -173,6 +173,8 @@ services:
       dockerfile: Dockerfile
     container_name: preempt-store
     command: ["/app/bin/store"]
+    ports:
+      - "8081:8081"
     environment:
       - CONFIG_PATH=/app/config.yaml
       - DB_HOST=mysql
@@ -258,6 +260,44 @@ services:
     networks:
       - preempt-network
 
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: preempt-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: preempt-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - preempt-network
+
 networks:
   preempt-network:
     driver: bridge
@@ -266,3 +306,5 @@ volumes:
   mysql_data:
   redis_data:
   ml_models:
+  prometheus_data:
+  grafana_data:
