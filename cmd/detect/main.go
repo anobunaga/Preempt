@@ -5,6 +5,9 @@ import (
 	"preempt/internal/config"
 	"preempt/internal/database"
 	"preempt/internal/detector"
+	"preempt/internal/models"
+	"sync"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -53,49 +56,135 @@ func main() {
 	log.Println("Detection run completed successfully")
 }
 
-func runDetectionForAllLocations(db *database.DB, locations []database.Location, anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester) {
-	log.Println("Running anomaly detection for all locations...")
+// DetectionResult holds the results for a single location
+type DetectionResult struct {
+	Location       string
+	Anomalies      []models.Anomaly
+	Suggestions    []models.AlarmSuggestion
+	Error          error
+	ProcessingTime time.Duration
+}
 
+func runDetectionForAllLocations(db *database.DB, locations []database.Location, anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester) {
+	startTime := time.Now()
+	log.Printf("Running anomaly detection for %d locations with worker pool...", len(locations))
+
+	// Configure worker pool - use 50 workers or fewer if less locations
+	numWorkers := 50
+	if len(locations) < 50 {
+		numWorkers = len(locations)
+	}
+
+	// Create channels for job distribution and result collection
+	jobs := make(chan database.Location, len(locations))
+	results := make(chan DetectionResult, len(locations))
+
+	// Start worker pool
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go worker(i, db, jobs, results, anomalyDetector, alarmSuggester, &wg)
+	}
+
+	// Send all locations to job queue
+	for _, location := range locations {
+		jobs <- location
+	}
+	close(jobs)
+
+	// Wait for all workers to finish, then close results channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect and process results
 	totalAnomalies := 0
 	totalSuggestions := 0
+	totalErrors := 0
+	locationCount := 0
 
-	for _, location := range locations {
-		log.Printf("Detecting anomalies for %s", location.Name)
+	for result := range results {
+		locationCount++
+
+		if result.Error != nil {
+			log.Printf("[%d/%d] ❌ %s: %v (%.1fs)",
+				locationCount, len(locations), result.Location, result.Error, result.ProcessingTime.Seconds())
+			totalErrors++
+			continue
+		}
+
+		if len(result.Anomalies) > 0 {
+			// Store anomalies in database
+			if err := db.StoreAnomalies(result.Anomalies); err != nil {
+				log.Printf("[%d/%d] Failed to store anomalies for %s: %v",
+					locationCount, len(locations), result.Location, err)
+				totalErrors++
+			} else {
+				totalAnomalies += len(result.Anomalies)
+
+				// Store alarm suggestions
+				if len(result.Suggestions) > 0 {
+					for _, suggestion := range result.Suggestions {
+						if err := db.StoreAlarmSuggestion(&suggestion); err != nil {
+							log.Printf("Failed to store alarm suggestion for %s: %v", result.Location, err)
+						} else {
+							totalSuggestions++
+						}
+					}
+				}
+
+				log.Printf("[%d/%d] ✓ %s: %d anomalies, %d suggestions (%.1fs)",
+					locationCount, len(locations), result.Location,
+					len(result.Anomalies), len(result.Suggestions), result.ProcessingTime.Seconds())
+			}
+		} else {
+			log.Printf("[%d/%d] ✓ %s: no anomalies (%.1fs)",
+				locationCount, len(locations), result.Location, result.ProcessingTime.Seconds())
+		}
+	}
+
+	totalDuration := time.Since(startTime)
+	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	log.Printf("Detection complete in %.1f minutes (%.1f seconds)", totalDuration.Minutes(), totalDuration.Seconds())
+	log.Printf("  Locations: %d processed, %d errors", locationCount-totalErrors, totalErrors)
+	log.Printf("  Anomalies: %d found", totalAnomalies)
+	log.Printf("  Suggestions: %d generated", totalSuggestions)
+	log.Printf("  Avg time/location: %.1fs", totalDuration.Seconds()/float64(locationCount))
+	log.Printf("  Workers: %d", numWorkers)
+	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
+// worker processes locations from the jobs channel
+func worker(id int, db *database.DB, jobs <-chan database.Location, results chan<- DetectionResult,
+	anomalyDetector *detector.AnomalyDetector, alarmSuggester *detector.AlarmSuggester, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for location := range jobs {
+		startTime := time.Now()
 
 		// Detect anomalies for this location
 		anomalies, err := anomalyDetector.DetectAnomalies(db, location.Name)
 		if err != nil {
-			log.Printf("Failed to detect anomalies for %s: %v", location.Name, err)
+			results <- DetectionResult{
+				Location:       location.Name,
+				Error:          err,
+				ProcessingTime: time.Since(startTime),
+			}
 			continue
 		}
 
+		// Generate alarm suggestions if anomalies found
+		var suggestions []models.AlarmSuggestion
 		if len(anomalies) > 0 {
-			// Store anomalies in database
-			if err := db.StoreAnomalies(anomalies); err != nil {
-				log.Printf("Failed to store anomalies for %s: %v", location.Name, err)
-			} else {
-				log.Printf("✓ Stored %d anomalies for %s", len(anomalies), location.Name)
-				totalAnomalies += len(anomalies)
-			}
+			suggestions = alarmSuggester.SuggestAlarms(anomalies, location.Name)
+		}
 
-			// Generate alarm suggestions based on anomalies
-			suggestions := alarmSuggester.SuggestAlarms(anomalies, location.Name)
-			if len(suggestions) > 0 {
-				for _, suggestion := range suggestions {
-					if err := db.StoreAlarmSuggestion(&suggestion); err != nil {
-						log.Printf("Failed to store alarm suggestion for %s: %v", location.Name, err)
-					} else {
-						log.Printf("✓ Stored alarm suggestion for %s - %s (confidence: %.2f)",
-							location.Name, suggestion.MetricType, suggestion.Confidence)
-						totalSuggestions++
-					}
-				}
-			}
-		} else {
-			log.Printf("No anomalies detected for %s", location.Name)
+		results <- DetectionResult{
+			Location:       location.Name,
+			Anomalies:      anomalies,
+			Suggestions:    suggestions,
+			ProcessingTime: time.Since(startTime),
 		}
 	}
-
-	log.Printf("Detection complete: %d total anomalies found, %d alarm suggestions generated",
-		totalAnomalies, totalSuggestions)
 }

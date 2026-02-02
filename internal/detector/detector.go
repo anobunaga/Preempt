@@ -53,9 +53,13 @@ func (ad *AnomalyDetector) DetectAnomalies(db *database.DB, location string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anomalies via stats method %s", err)
 	}
+
+	// Try ML detection, but use circuit breaker pattern - fall back to stats-only if ML fails
 	ml_anomalies, err := ad.getMLAnomalies(db, location)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get anomalies via machine learning model method %s", err)
+		// ML service timeout or failure - continue with stats-based detection only
+		log.Printf("ML detection skipped for %s (using stats-only): %v", location, err)
+		return stats_anomalies, nil
 	}
 
 	//combine with stats z-score anomalies and return total list
