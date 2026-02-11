@@ -31,10 +31,12 @@ func NewDB(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Configure connection pool
-	conn.SetMaxOpenConns(25)
-	conn.SetMaxIdleConns(5)
-	conn.SetConnMaxLifetime(5 * time.Minute)
+	// Configure connection pool for concurrent detector workers (50 workers + other services)
+	// Each worker may use 2-3 connections simultaneously during detection
+	conn.SetMaxOpenConns(100)                 // Support 50 workers × 2 connections each
+	conn.SetMaxIdleConns(25)                  // Keep 25 connections ready for burst traffic
+	conn.SetConnMaxLifetime(5 * time.Minute)  // Recycle connections every 5 min
+	conn.SetConnMaxIdleTime(2 * time.Minute)  // Close idle connections after 2 min
 
 	db := &DB{conn: conn}
 
