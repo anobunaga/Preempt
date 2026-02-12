@@ -78,28 +78,29 @@ help:
 # Database Migration Commands
 DB_USER?=myapp
 DB_PASSWORD?=mypassword123
-DB_HOST?=localhost
+DB_HOST?=mysql
 DB_PORT?=3306
 DB_NAME?=preempt
 MIGRATION_PATH=./migrations
+NETWORK_NAME?=preempt_preempt-network
 DB_URL=mysql://$(DB_USER):$(DB_PASSWORD)@tcp($(DB_HOST):$(DB_PORT))/$(DB_NAME)
 
 ## migrate-up: Apply all pending migrations
 migrate-up:
 	@echo "Running migrations up..."
-	docker run --rm -v $(PWD)/migrations:/migrations --network preempt_preempt-network \
+	docker run --rm -v $(PWD)/migrations:/migrations --network $(NETWORK_NAME) \
 		migrate/migrate -path=/migrations -database "$(DB_URL)" up
 
 ## migrate-down: Rollback last migration
 migrate-down:
 	@echo "Rolling back migration..."
-	docker run --rm -v $(PWD)/migrations:/migrations --network preempt_preempt-network \
+	docker run --rm -v $(PWD)/migrations:/migrations --network $(NETWORK_NAME) \
 		migrate/migrate -path=/migrations -database "$(DB_URL)" down 1
 
 ## migrate-down-all: Rollback all migrations
 migrate-down-all:
 	@echo "Rolling back all migrations..."
-	docker run --rm -v $(PWD)/migrations:/migrations --network preempt_preempt-network \
+	docker run --rm -v $(PWD)/migrations:/migrations --network $(NETWORK_NAME) \
 		migrate/migrate -path=/migrations -database "$(DB_URL)" down -all
 
 ## migrate-create: Create a new migration (usage: make migrate-create NAME=add_users_table)
@@ -113,11 +114,11 @@ migrate-create:
 migrate-force:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make migrate-force VERSION=version_number"; exit 1; fi
 	@echo "Forcing migration version to $(VERSION)..."
-	docker run --rm -v $(PWD)/migrations:/migrations --network preempt_preempt-network \
+	docker run --rm -v $(PWD)/migrations:/migrations --network $(NETWORK_NAME) \
 		migrate/migrate -path=/migrations -database "$(DB_URL)" force $(VERSION)
 
 ## migrate-version: Show current migration version
 migrate-version:
 	@echo "Current migration version:"
-	docker run --rm -v $(PWD)/migrations:/migrations --network preempt_preempt-network \
+	docker run --rm -v $(PWD)/migrations:/migrations --network $(NETWORK_NAME) \
 		migrate/migrate -path=/migrations -database "$(DB_URL)" version
