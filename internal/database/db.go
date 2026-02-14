@@ -33,10 +33,10 @@ func NewDB(dsn string) (*DB, error) {
 
 	// Configure connection pool for concurrent detector workers (50 workers + other services)
 	// Each worker may use 2-3 connections simultaneously during detection
-	conn.SetMaxOpenConns(100)                 // Support 50 workers × 2 connections each
-	conn.SetMaxIdleConns(25)                  // Keep 25 connections ready for burst traffic
-	conn.SetConnMaxLifetime(5 * time.Minute)  // Recycle connections every 5 min
-	conn.SetConnMaxIdleTime(2 * time.Minute)  // Close idle connections after 2 min
+	conn.SetMaxOpenConns(100)                // Support 50 workers × 2 connections each
+	conn.SetMaxIdleConns(25)                 // Keep 25 connections ready for burst traffic
+	conn.SetConnMaxLifetime(5 * time.Minute) // Recycle connections every 5 min
+	conn.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2 min
 
 	db := &DB{conn: conn}
 
@@ -147,7 +147,9 @@ func (db *DB) storeHourlyMetrics(forecast *models.Forecast, location string, fie
 				continue
 			}
 
-			query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+			query := `INSERT INTO metrics (location, timestamp, metric_type, value) 
+			          VALUES (?, ?, ?, ?) 
+			          ON DUPLICATE KEY UPDATE value = VALUES(value)`
 			queryStart := time.Now()
 			_, err = db.conn.Exec(query, location, timestamp, fieldName, value)
 			metrics.RecordDBQuery("INSERT", "metrics", time.Since(queryStart), err)
@@ -190,7 +192,9 @@ func (db *DB) storeCurrentMetrics(forecast *models.Forecast, location string, fi
 			continue
 		}
 
-		query := `INSERT INTO metrics (location, timestamp, metric_type, value) VALUES (?, ?, ?, ?)`
+		query := `INSERT INTO metrics (location, timestamp, metric_type, value) 
+		          VALUES (?, ?, ?, ?) 
+		          ON DUPLICATE KEY UPDATE value = VALUES(value)`
 		queryStart := time.Now()
 		_, err := db.conn.Exec(query, location, now, fieldName, *value)
 		metrics.RecordDBQuery("INSERT", "metrics", time.Since(queryStart), err)
@@ -212,7 +216,12 @@ func (db *DB) StoreAnomaly(anomaly *models.Anomaly) error {
 		metrics.UpdateDBConnectionStats(stats.OpenConnections, stats.InUse, stats.Idle)
 	}()
 
-	query := `INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) 
+	          VALUES (?, ?, ?, ?, ?, ?) 
+	          ON DUPLICATE KEY UPDATE 
+	              value = VALUES(value), 
+	              z_score = VALUES(z_score), 
+	              severity = VALUES(severity)`
 	_, err := db.conn.Exec(query, anomaly.Location, anomaly.Timestamp, anomaly.MetricType, anomaly.Value, anomaly.ZScore, anomaly.Severity)
 	metrics.RecordDBQuery("INSERT", "anomalies", time.Since(queryStart), err)
 	return err
@@ -232,7 +241,12 @@ func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
 	defer tx.Rollback() // Will be ignored if committed
 
 	// Prepare statement
-	stmt, err := tx.Prepare(`INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) VALUES (?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO anomalies (location, timestamp, metric_type, value, z_score, severity) 
+	                         VALUES (?, ?, ?, ?, ?, ?) 
+	                         ON DUPLICATE KEY UPDATE 
+	                             value = VALUES(value), 
+	                             z_score = VALUES(z_score), 
+	                             severity = VALUES(severity)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -258,7 +272,12 @@ func (db *DB) StoreAnomalies(anomalies []models.Anomaly) error {
 // StoreAlarmSuggestion stores an alarm suggestion
 func (db *DB) StoreAlarmSuggestion(suggestion *models.AlarmSuggestion) error {
 	query := `INSERT INTO alarm_suggestions (location, metric_type, threshold, operator, suggested_at, confidence, description, anomaly_count) 
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+	          ON DUPLICATE KEY UPDATE 
+	              threshold = VALUES(threshold), 
+	              confidence = VALUES(confidence), 
+	              description = VALUES(description), 
+	              anomaly_count = VALUES(anomaly_count)`
 	_, err := db.conn.Exec(query, suggestion.Location, suggestion.MetricType, suggestion.Threshold, suggestion.Operator, suggestion.SuggestedAt,
 		suggestion.Confidence, suggestion.Description, suggestion.AnomalyCount)
 	return err
