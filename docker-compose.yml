@@ -184,8 +184,11 @@ services:
       - DB_NAME=preempt
       - REDIS_ADDR=redis:6379
       - REDIS_STREAM=weather_metrics
+      - WAL_ENABLED=true
+      - WAL_PATH=/app/wal/store.wal
     volumes:
       - ./config.yaml:/app/config.yaml
+      - store_wal:/app/wal
     depends_on:
       mysql:
         condition: service_healthy
@@ -308,3 +311,4 @@ volumes:
   ml_models:
   prometheus_data:
   grafana_data:
+  store_wal:

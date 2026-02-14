@@ -61,6 +61,7 @@ Analysis          ML Trainer (Python, continuous)
 - **Alarm Suggestions** - Auto-generated thresholds from anomaly patterns
 - **Location-based Filtering** - All data indexed and queryable by location
 - **Modern Stack** - Go backend, Python ML, TypeScript + React frontend, MySQL + Redis
+- **Production-Grade Durability** - Write-Ahead Logging, idempotent inserts, crash recovery, pending message cleanup
 
 ## Project Structure
 
@@ -81,9 +82,11 @@ internal/
   ml/         # Python ML service (train.py - runs as Docker container)
   models/     # Data structures
   server/     # HTTP handlers
+  wal/        # Write-Ahead Logging for crash recovery
 migrations/   # Database schema migrations
   000001_initial_schema.up.sql
   000002_add_locations_table.up.sql
+  000004_add_idempotency.up.sql  # Unique constraints for idempotent inserts
 ```
 
 ## Configuration
@@ -377,6 +380,39 @@ ORDER BY anomaly_count DESC;
 ```
 
 **Default credentials:** `myapp:mypassword123@preempt`
+
+## Durability & Reliability
+
+The Store service implements production-grade durability patterns to ensure zero data loss:
+
+### Write-Ahead Logging (WAL)
+- All incoming messages written to append-only log **before** database insertion
+- Crash recovery on startup replays uncommitted WAL entries
+- Auto-compaction every 5 minutes removes committed entries
+- Persisted to Docker volume: `preempt_store_wal`
+
+### Idempotent Database Inserts
+- `ON DUPLICATE KEY UPDATE` on all INSERT statements
+- UNIQUE constraints on `(location, metric_type, timestamp)` prevent duplicates
+- Safe message reprocessing after failures or retries
+
+### Redis Stream Pending Cleanup
+- Background goroutine monitors stuck messages (>5 min idle)
+- Auto-reclaims and retries via `XCLAIM` 
+- Prevents message loss from transient failures
+
+### Crash Recovery Test
+```bash
+# Simulate crash during processing
+docker compose kill -s SIGKILL store
+
+# Restart and verify WAL replay
+docker compose up -d store
+docker compose logs store | grep "WAL replay"
+# Output: "✓ WAL replay complete: X/X entries processed successfully"
+```
+
+**Guarantees:** At-least-once delivery with exactly-once storage (via idempotency)
 
 ## Deployment
 
