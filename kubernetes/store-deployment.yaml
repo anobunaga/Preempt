@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store
+  namespace: preempt
+  labels:
+    app: store
+    tier: backend
+spec:
+  replicas: 1  # Single consumer for now
+  selector:
+    matchLabels:
+      app: store
+  template:
+    metadata:
+      labels:
+        app: store
+        tier: backend
+    spec:
+      containers:
+      - name: store
+        image: preempt-backend:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/app/bin/store"]
+        env:
+        - name: CONFIG_PATH
+          value: /app/config.yaml
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PASSWORD
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_NAME
+        - name: REDIS_ADDR
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_ADDR
+        - name: REDIS_STREAM
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_STREAM
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "150m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+      volumes:
+      - name: config
+        configMap:
+          name: preempt-config

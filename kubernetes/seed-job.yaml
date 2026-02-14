@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  namespace: preempt
+  labels:
+    app: seed
+    tier: migration
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: seed
+    spec:
+      restartPolicy: OnFailure
+      # Init container to wait for migrations to complete
+      initContainers:
+      - name: wait-for-migrate
+        image: bitnami/kubectl:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for migrate job to complete..."
+          kubectl wait --for=condition=complete --timeout=300s job/migrate -n preempt || true
+          echo "Migration check complete"
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+      containers:
+      - name: seed
+        image: preempt-backend:latest  # Built from main Dockerfile
+        imagePullPolicy: IfNotPresent
+        command: ["/app/bin/seed"]
+        env:
+        - name: CONFIG_PATH
+          value: /app/config.yaml
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PORT
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_PASSWORD
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: DB_NAME
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        - name: seed-data
+          mountPath: /app/locations_seed.csv
+          subPath: locations_seed.csv
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: config
+        configMap:
+          name: preempt-config
+      - name: seed-data
+        hostPath:
+          path: /Users/adamnobunaga/projects/Preempt/cmd/seed
+          type: Directory

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: preempt
+  labels:
+    name: preempt
+    environment: development

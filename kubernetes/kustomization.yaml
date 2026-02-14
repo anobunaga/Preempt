@@ -1,0 +1,40 @@
+# Kustomization file for Preempt
+# Allows deploying all manifests with: kubectl apply -k .
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: preempt
+
+resources:
+  # Base infrastructure
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - persistent-volumes.yaml
+  
+  # Databases
+  - mysql-deployment.yaml
+  - redis-deployment.yaml
+  
+  # Jobs (migrations and seed)
+  - migrate-job.yaml
+  - seed-job.yaml
+  
+  # Backend services
+  - api-deployment.yaml
+  - store-deployment.yaml
+  - ml-trainer-deployment.yaml
+  
+  # Scheduled jobs
+  - collector-cronjob.yaml
+  - detector-cronjob.yaml
+  
+  # Frontend
+  - frontend-deployment.yaml
+
+# Optional: Add common labels to all resources
+commonLabels:
+  app.kubernetes.io/name: preempt
+  app.kubernetes.io/version: "1.0"
+  app.kubernetes.io/managed-by: kustomize
